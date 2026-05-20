@@ -1,0 +1,978 @@
+"""
+有色金属回收倒卖AI系统 v3 — 专业版UI
+"""
+import streamlit as st
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from database import init_db, SessionLocal
+from services.price_service import MetalPriceService
+from services.inventory_service import InventoryService
+from services.recommendation_service import RecommendationService
+from services.alert_service import AlertService
+from services.llm_service import LLMService
+from services.news_service import NewsService
+from web.styles import (
+    inject_css, kpi_card, section_header,
+    confidence_indicator, empty_state, factor_scores_card,
+    recommendation_card, styled_plotly, plotly_theme,
+    mobile_kpi_row, mobile_bottom_nav,
+)
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime
+
+# ═══════════════════════════════════════════════════════════
+#  页面配置 & 样式注入
+# ═══════════════════════════════════════════════════════════
+st.set_page_config(
+    page_title="有色金属回收AI系统",
+    page_icon="🔩",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+inject_css()
+
+# ═══════════════════════════════════════════════════════════
+#  服务初始化
+# ═══════════════════════════════════════════════════════════
+@st.cache_resource
+def init_services():
+    init_db()
+    sf = SessionLocal
+    price_svc = MetalPriceService(sf)
+    llm_svc = LLMService()
+    return {
+        "price": price_svc,
+        "inventory": InventoryService(sf),
+        "recommendation": RecommendationService(sf, price_service=price_svc, llm_service=llm_svc),
+        "alert": AlertService(sf),
+        "session": sf,
+        "llm": llm_svc,
+        "news": NewsService(),
+    }
+
+services = init_services()
+
+def _safe_toast(msg, icon=None):
+    """安全 toast（兼容旧版 Streamlit）"""
+    try:
+        st.toast(msg, icon=icon)
+    except AttributeError:
+        pass  # 旧版无 toast，静默跳过
+
+# ═══════════════════════════════════════════════════════════
+#  启动时自动连接实时数据源
+# ═══════════════════════════════════════════════════════════
+if "_auto_connected" not in st.session_state:
+    st.session_state["_auto_connected"] = True
+    if not services["price"].is_using_real_data:
+        result = services["price"].auto_connect()
+        if result["success"]:
+            _safe_toast(f"✅ {result['message']}")
+        else:
+            _safe_toast(f"⚠️ {result.get('message', 'SHFE连接失败')}")
+        st.cache_data.clear()
+        st.rerun()
+
+
+# ═══════════════════════════════════════════════════════
+#  静默后台刷新（仅在数据过期时触发一次 rerun，防抖 45s）
+# ═══════════════════════════════════════════════════════
+_real_enabled = services["price"].is_using_real_data
+if _real_enabled:
+    last_up = services["price"].last_update_time
+    now_ts = datetime.now()
+    last_rerun_ts = st.session_state.get("_last_data_rerun")
+    if last_up:
+        data_age = (now_ts - last_up).total_seconds()
+    else:
+        data_age = 999
+    need_rerun = data_age > 30
+    can_rerun = (last_rerun_ts is None or (now_ts - last_rerun_ts).total_seconds() > 45)
+    if need_rerun and can_rerun:
+        services["price"].refresh_spot_only()
+        st.session_state["_last_data_rerun"] = now_ts
+        st.cache_data.clear()
+        st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════
+#  缓存装饰器
+# ═══════════════════════════════════════════════════════════
+@st.cache_data(ttl=60, show_spinner=False)
+def get_cached_prices():
+    return services["price"].fetch_all_current_prices()
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_cached_summaries():
+    return services["price"].get_all_price_summaries()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_cached_recommendations():
+    return services["recommendation"].get_top_opportunities(top_n=5)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_inventory_summary():
+    return services["inventory"].get_inventory_summary()
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_profit_summary(days=30):
+    return services["inventory"].get_profit_summary(days=days)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_all_inventory():
+    return services["inventory"].get_all_inventory()
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_transactions(limit=100):
+    return services["inventory"].get_transaction_history(limit=limit)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_history_cached(metal, days):
+    df, _src = services["price"].get_historical_prices(metal, days=days)
+    return df
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_news_headlines(limit=8):
+    return services["news"].get_market_headlines(limit=limit)
+
+
+# ═══════════════════════════════════════════════════════════
+#  侧边栏
+# ═══════════════════════════════════════════════════════════
+with st.sidebar:
+    st.markdown(
+        '<div style="text-align:center;padding:8px 0 12px 0;">'
+        '<span style="font-size:1.3rem;font-weight:800;'
+        'background:linear-gradient(90deg,#C8923A,#D4832A);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
+        'background-clip:text;">🔩 Metal AI Trading</span>'
+        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3 专业版</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    page = st.radio(
+        "📋 导航",
+        ["📊 仪表盘", "💰 实时行情", "📦 库存管理", "🤖 AI推荐",
+         "📈 走势分析", "🔔 价格预警", "📋 交易记录", "👥 客户供应商", "📊 利润分析"],
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
+
+    # 数据源
+    st.caption("📡 数据源")
+    real_enabled = services["price"].is_using_real_data
+    if real_enabled:
+        st.success("⚡ SHFE 实时行情")
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            if st.button("🔄 刷新价格", width='stretch',
+                         help="获取最新SHFE报价+5分钟K线"):
+                with st.spinner("刷新中..."):
+                    refresh_r = services["price"].refresh_realtime_prices()
+                    if refresh_r["success"]:
+                        _safe_toast(f"✅ {refresh_r['message']}")
+                    else:
+                        _safe_toast(f"⚠️ {refresh_r['message']}")
+                    st.cache_data.clear()
+                    st.rerun()
+        with col_r2:
+            if st.button("📴 模拟", width='stretch'):
+                services["price"].use_simulated()
+                st.cache_data.clear()
+                st.rerun()
+    else:
+        st.warning("📀 本地模拟数据")
+        if st.button("📡 连接实时行情", width='stretch',
+                     help="从上海期货交易所获取实时数据"):
+            with st.spinner("连接SHFE..."):
+                result = services["price"].try_fetch_real()
+                if result["success"]:
+                    _safe_toast(f"✅ {result['message']}")
+                else:
+                    _safe_toast(f"⚠️ {result.get('message', '连接失败')}")
+                st.cache_data.clear()
+                st.rerun()
+
+    # LLM
+    st.caption("🧠 AI 状态")
+    if services.get("llm") and services["llm"].available:
+        st.success("DeepSeek 已连接")
+    else:
+        st.warning("未配置 API Key")
+
+    st.markdown("---")
+    st.caption("⚡ 快速行情")
+    try:
+        prices = get_cached_prices()
+        for p in prices[:6]:
+            chg = p.get('change_pct', 0)
+            sign = "+" if chg >= 0 else ""
+            color = "#10B981" if chg >= 0 else "#EF4444"
+            st.markdown(
+                f'<div style="display:flex;justify-content:space-between;'
+                f'font-size:0.82rem;margin:3px 0;">'
+                f'<span style="color:#6B7280;">'
+                f'{p["metal_type"]}</span>'
+                f'<span style="color:#1A1D26;font-weight:600;">¥{p["price"]:,.0f}</span>'
+                f'<span style="color:{color};font-weight:600;">{sign}{chg:.2f}%</span></div>',
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass
+
+    st.markdown("---")
+    st.caption("📰 金属快讯")
+    try:
+        headlines = get_news_headlines(5)
+        if headlines:
+            for h in headlines[:5]:
+                content = h['content']
+                if len(content) > 50:
+                    content = content[:48] + ".."
+                st.markdown(
+                    f'<div style="font-size:0.72rem;color:#1A1D26;padding:1px 0;'
+                    f'border-left:2px solid #C8923A;padding-left:6px;margin:2px 0;'
+                    f'line-height:1.3;">{content}</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("（暂无快讯）")
+    except Exception:
+        pass
+
+    st.markdown("---")
+    # 数据更新时间 & 自动刷新（仅展示，不触发 rerun）
+    if real_enabled:
+        last_up = services["price"].last_update_time
+        if last_up:
+            elapsed = (datetime.now() - last_up).total_seconds()
+            age_str = f"{elapsed:.0f}秒前" if elapsed < 120 else f"{elapsed/60:.0f}分钟前"
+            st.caption(f"📡 上海期货交易所")
+            st.caption(f"⏱️ 更新: {last_up.strftime('%H:%M:%S')} ({age_str})")
+        else:
+            st.caption(f"📡 数据源: SHFE")
+
+        # 自动刷新开关（控制 JS 轮询）
+        auto_key = "_auto_refresh"
+        if auto_key not in st.session_state:
+            st.session_state[auto_key] = True
+        auto_refresh = st.checkbox("⏱️ 每120秒自动刷新", value=st.session_state[auto_key],
+                                   key="auto_refresh_cb")
+        st.session_state[auto_key] = auto_refresh
+    else:
+        st.caption(f"📀 数据源: 本地模拟")
+
+    col_r, col_v = st.columns([3, 2])
+    with col_r:
+        if st.button("🔄 强制刷新", width='stretch'):
+            st.cache_data.clear()
+            st.rerun()
+    with col_v:
+        st.caption(datetime.now().strftime("%H:%M"))
+
+
+# ── 自动刷新注入（每 120 秒轻量刷新） ──
+if real_enabled and st.session_state.get("_auto_refresh", True):
+    st.markdown(
+        """
+        <script>
+        if (!window._metalAutoRefresh) {
+            window._metalAutoRefresh = setInterval(function() {
+                var btns = window.parent.document.querySelectorAll('button');
+                for (var i = 0; i < btns.length; i++) {
+                    if (btns[i].textContent.includes('强制刷新')) {
+                        btns[i].click(); break;
+                    }
+                }
+            }, 120000);
+        }
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+
+# ═══════════════════════════════════════════════════════════
+#  📊 仪表盘
+# ═══════════════════════════════════════════════════════════
+if page == "📊 仪表盘":
+    st.title("📊 仪表盘总览")
+
+    inv_s = get_inventory_summary()
+    prof = get_profit_summary(30)
+    mobile_kpi_row([
+        ("库存总价值", f"¥{inv_s['total_value']:,.0f}", f"{inv_s['profit_pct']:+.1f}%", "normal", "💎"),
+        ("浮动盈亏", f"¥{inv_s['total_profit']:,.0f}", None, "normal", "📈"),
+        ("30天利润", f"¥{prof['total_profit']:,.0f}", f"{prof['total_sell_transactions']}笔交易", "normal", "🏆"),
+        ("库存品类", str(inv_s['total_items']), f"{len(inv_s.get('by_metal', {}))}种金属", "normal", "📦"),
+    ], cols_per_row=2)
+
+    st.markdown("---")
+
+    left, right = st.columns(2)
+    with left:
+        section_header("🔥 行情热力", "各金属日涨跌幅一览")
+        summaries = get_cached_summaries()
+        if summaries:
+            df_s = pd.DataFrame(summaries)
+            fig = px.bar(
+                df_s, x='metal_type', y='change_day',
+                color='change_day',
+                color_continuous_scale=[
+                    (0, '#EF4444'), (0.45, '#9CA3AF'), (0.5, '#6B7280'),
+                    (0.55, '#9CA3AF'), (1, '#10B981')
+                ],
+                labels={'change_day': '涨跌%', 'metal_type': ''},
+            )
+            fig.update_traces(marker=dict(line=dict(width=0)))
+            styled_plotly(fig)
+            fig.update_layout(height=320, showlegend=False)
+            st.plotly_chart(fig, width='stretch')
+
+    with right:
+        section_header("📦 库存分布", "持仓市值构成")
+        bm = inv_s.get("by_metal", {})
+        if bm:
+            df_pie = pd.DataFrame([
+                {"金属": k, "市值": v["total_value"]}
+                for k, v in bm.items()
+            ])
+            colors_pie = [
+                '#C8923A', '#D4832A', '#B07E30', '#9C6E28',
+                '#F59E0B', '#D4832A', '#A07030', '#CD853F',
+            ]
+            fig = px.pie(
+                df_pie, values='市值', names='金属',
+                color_discrete_sequence=colors_pie,
+            )
+            fig.update_traces(
+                textposition='inside', textinfo='percent+label',
+                textfont=dict(size=12, color='#FFFFFF'),
+                marker=dict(line=dict(color='#FFFFFF', width=2)),
+            )
+            styled_plotly(fig)
+            fig.update_layout(height=320, showlegend=False)
+            st.plotly_chart(fig, width='stretch')
+        else:
+            empty_state("暂无库存数据", "📦")
+
+    st.markdown("---")
+
+    section_header("🤖 AI 智能推荐", "v3 多因子分析 · 技术面+基本面+运营面")
+    try:
+        with st.spinner("🧠 正在运行多因子分析引擎..."):
+            opps = get_cached_recommendations()
+        rc1, rc2 = st.columns(2)
+
+        with rc1:
+            st.markdown("#### 🟢 推荐买入")
+            for i, rec in enumerate(opps.get("top_buy", [])[:3], 1):
+                recommendation_card(rec, i, "buy")
+                with st.expander("📊 评分明细 & 理由"):
+                    factor_scores_card(rec.get('trend_analysis', {}))
+                    st.caption(rec.get('reason', ''))
+                if rec.get('llm_available') and rec.get('llm_analysis'):
+                    with st.expander("🧠 DeepSeek AI 分析"):
+                        st.markdown(rec['llm_analysis'])
+            if not opps.get("top_buy"):
+                empty_state("暂无强烈买入信号", "📈")
+
+        with rc2:
+            st.markdown("#### 🔴 推荐卖出")
+            for i, rec in enumerate(opps.get("top_sell", [])[:3], 1):
+                recommendation_card(rec, i, "sell")
+                with st.expander("📊 评分明细 & 理由"):
+                    factor_scores_card(rec.get('trend_analysis', {}))
+                    st.caption(rec.get('reason', ''))
+                if rec.get('llm_available') and rec.get('llm_analysis'):
+                    with st.expander("🧠 DeepSeek AI 分析"):
+                        st.markdown(rec['llm_analysis'])
+            if not opps.get("top_sell"):
+                empty_state("暂无强烈卖出信号", "📉")
+    except Exception as e:
+        st.warning(f"推荐生成中，请稍后刷新...")
+
+    st.markdown("---")
+    section_header("📋 最近交易", "")
+    txns = get_transactions(5)
+    if txns:
+        df_txn = pd.DataFrame(txns)[[
+            'date', 'type', 'metal', 'quantity_kg',
+            'price_per_kg', 'total', 'profit',
+        ]]
+        df_txn.columns = ['日期', '类型', '金属', '数量kg', '单价', '总额', '利润']
+        st.dataframe(df_txn, width='stretch', hide_index=True)
+    else:
+        empty_state("暂无交易记录", "📝")
+
+    st.markdown("---")
+    section_header("📰 金属快讯", "上海金属网 · 最新行情动态")
+    headlines = get_news_headlines(10)
+    if headlines:
+        for h in headlines:
+            content = h['content']
+            time_str = h.get('time', '')
+            if time_str:
+                time_str = time_str[-8:] if len(time_str) > 8 else time_str
+            st.markdown(
+                f'<div style="display:flex;align-items:flex-start;padding:4px 0;'
+                f'border-bottom:1px solid #1F2937;font-size:0.82rem;">'
+                f'<span style="color:#C8923A;min-width:52px;font-weight:600;'
+                f'font-size:0.72rem;">{time_str}</span>'
+                f'<span style="color:#1A1D26;flex:1;">{content}</span></div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        empty_state("暂无快讯数据", "📰")
+
+
+# ═══════════════════════════════════════════════════════════
+#  💰 实时行情
+# ═══════════════════════════════════════════════════════════
+elif page == "💰 实时行情":
+    st.title("💰 实时行情")
+
+    summaries = get_cached_summaries()
+    if summaries:
+        df = pd.DataFrame(summaries).rename(columns={
+            'metal_type': '金属', 'current_price': '现价',
+            'change_day': '日涨跌%', 'change_week': '周涨跌%',
+            'change_month': '月涨跌%', 'ma7': 'MA7', 'ma30': 'MA30',
+            'trend': '趋势', 'support': '支撑', 'resistance': '阻力',
+            'volatility': '波动率%',
+        })
+        st.dataframe(df, width='stretch', hide_index=True)
+
+    st.markdown("---")
+    section_header("🔍 金属详情", "选择金属查看完整技术指标")
+    metals = [s['metal_type'] for s in summaries] if summaries else []
+    sel = st.selectbox("选择金属", metals, label_visibility="collapsed")
+
+    if sel:
+        s = services["price"].get_price_summary(sel)
+        if s:
+            chg_day = s['change_day']
+            chg_color = "normal" if chg_day >= 0 else "inverse"
+            cols_top = st.columns([2, 1, 1, 1, 1])
+            with cols_top[0]:
+                kpi_card("💰 当前价格", f"¥{s['current_price']:,.0f}",
+                         f"{s['change_day']:+.2f}% (日)",
+                         delta_color=chg_color, icon=sel)
+            with cols_top[1]:
+                kpi_card("周涨跌", f"{s['change_week']:+.2f}%")
+            with cols_top[2]:
+                kpi_card("月涨跌", f"{s['change_month']:+.2f}%")
+            with cols_top[3]:
+                kpi_card("波动率", f"{s['volatility']:.2f}%")
+            with cols_top[4]:
+                trend_icon = "📈" if s['trend'] == "上涨" else "📉"
+                kpi_card("趋势", s['trend'], f"强度 {s['trend_strength']}%",
+                         icon=trend_icon)
+
+            cols_mid = st.columns(4)
+            cols_mid[0].metric("MA7", f"¥{s['ma7']:,.0f}")
+            cols_mid[1].metric("MA30", f"¥{s['ma30']:,.0f}")
+            cols_mid[2].metric("支撑位", f"¥{s['support']:,.0f}")
+            cols_mid[3].metric("阻力位", f"¥{s['resistance']:,.0f}")
+
+            st.caption(f"数据源: {s['source']} | 更新: {s.get('timestamp', '')}")
+
+
+# ═══════════════════════════════════════════════════════════
+#  📦 库存管理
+# ═══════════════════════════════════════════════════════════
+elif page == "📦 库存管理":
+    st.title("📦 库存管理")
+
+    inv_s = get_inventory_summary()
+    mobile_kpi_row([
+        ("总成本", f"¥{inv_s['total_cost']:,.0f}", None, "normal", "💰"),
+        ("总市值", f"¥{inv_s['total_value']:,.0f}", None, "normal", "💎"),
+        ("浮动盈亏", f"¥{inv_s['total_profit']:,.0f}", f"{inv_s['profit_pct']:+.1f}%", "normal", "📊"),
+        ("持仓条目", str(inv_s['total_items']), None, "normal", "📋"),
+    ], cols_per_row=2)
+
+    tab1, tab2 = st.tabs(["📋 查看库存", "➕ 入库"])
+
+    with tab1:
+        inv = get_all_inventory()
+        if inv:
+            df_inv = pd.DataFrame(inv).rename(columns={
+                'metal_type': '金属', 'quantity_kg': '数量kg',
+                'avg_cost_price': '成本价', 'current_market_price': '市场价',
+                'total_cost': '总成本', 'current_value': '市值',
+                'profit_loss': '盈亏', 'profit_loss_pct': '盈亏%',
+                'storage_location': '仓库', 'quality_grade': '品质',
+            })
+            st.dataframe(df_inv, width='stretch', hide_index=True)
+
+            st.markdown("---")
+            section_header("💰 卖出库存", "")
+
+            inv_map = {
+                f"#{i['id']} {i['metal_type']} {i['quantity_kg']}kg | 成本¥{i['avg_cost_price']}"
+                : i['id'] for i in inv
+            }
+            sel_inv = st.selectbox("选择库存条目", list(inv_map.keys()),
+                                   label_visibility="collapsed")
+
+            c1, c2, c3 = st.columns(3)
+            qty = c1.number_input("卖出数量(kg)", min_value=0.1, step=100.0, value=100.0)
+            price = c2.number_input("卖出单价(元/kg)", min_value=0.01, step=1.0, value=100.0)
+            buyer = c3.text_input("买家名称")
+
+            note = st.text_area("备注", key="inv_sell_notes", placeholder="交易备注...")
+
+            if st.button("✅ 确认卖出", type="primary", width='stretch'):
+                r = services["inventory"].sell_inventory(
+                    inv_map[sel_inv], qty, price, buyer, note
+                )
+                if r["success"]:
+                    st.success(r["message"])
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(r["message"])
+        else:
+            empty_state("暂无库存", "📭")
+
+    with tab2:
+        section_header("➕ 新增入库", "")
+        from config import METAL_TYPES
+        metals = list(METAL_TYPES.keys())
+        c1, c2, c3 = st.columns(3)
+        m = c1.selectbox("金属类型", metals)
+        q = c2.number_input("数量(kg)", min_value=1.0, step=100.0, value=1000.0)
+        cost = c3.number_input("购入单价(元/kg)", min_value=0.01, step=1.0, value=100.0)
+        c4, c5 = st.columns(2)
+        loc = c4.selectbox("仓库", ["主仓库", "A仓库", "B仓库"])
+        qual = c5.selectbox("品质", ["一级", "二级", "三级"])
+        notes = st.text_area("备注", key="inv_add_notes", placeholder="入库备注...")
+        if st.button("📥 确认入库", type="primary", width='stretch'):
+            r = services["inventory"].add_inventory(m, q, cost, loc, qual, notes)
+            if r["success"]:
+                st.success(r["message"])
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error(r["message"])
+
+
+# ═══════════════════════════════════════════════════════════
+#  🤖 AI推荐
+# ═══════════════════════════════════════════════════════════
+elif page == "🤖 AI推荐":
+    st.title("🤖 AI 智能交易推荐")
+
+    col_btn, col_info = st.columns([2, 5])
+    with col_btn:
+        if st.button("🔄 刷新 AI 分析", width='stretch', type="primary"):
+            st.cache_data.clear()
+            st.rerun()
+    with col_info:
+        st.caption("v3 多因子引擎 · 技术面+基本面+运营面 + DeepSeek AI")
+
+    try:
+        with st.spinner("🧠 多因子引擎分析中..."):
+            opps = get_cached_recommendations()
+        bc, sc = st.columns(2)
+
+        with bc:
+            st.markdown("#### 🟢 买入推荐")
+            for i, rec in enumerate(opps.get("top_buy", [])[:5], 1):
+                recommendation_card(rec, i, "buy")
+                with st.expander("📊 评分明细 & 理由"):
+                    factor_scores_card(rec.get('trend_analysis', {}))
+                    st.caption(rec.get('reason', ''))
+                if rec.get('llm_available') and rec.get('llm_analysis'):
+                    with st.expander("🧠 DeepSeek AI 分析"):
+                        st.markdown(rec['llm_analysis'])
+            if not opps.get("top_buy"):
+                empty_state("暂无买入信号", "📈")
+
+        with sc:
+            st.markdown("#### 🔴 卖出推荐")
+            for i, rec in enumerate(opps.get("top_sell", [])[:5], 1):
+                recommendation_card(rec, i, "sell")
+                with st.expander("📊 评分明细 & 理由"):
+                    factor_scores_card(rec.get('trend_analysis', {}))
+                    st.caption(rec.get('reason', ''))
+                if rec.get('llm_available') and rec.get('llm_analysis'):
+                    with st.expander("🧠 DeepSeek AI 分析"):
+                        st.markdown(rec['llm_analysis'])
+            if not opps.get("top_sell"):
+                empty_state("暂无卖出信号", "📉")
+
+        st.markdown("---")
+        section_header("📋 全部推荐概览", "")
+        all_r = opps.get("all", [])
+        if all_r:
+            df_r = pd.DataFrame(all_r)
+            df_r['操作'] = df_r['action'].map({
+                '买入': '🟢买入', '卖出': '🔴卖出', '持有': '⏸️持有'
+            })
+            st.dataframe(
+                df_r[['metal_type', '操作', 'confidence', 'current_price',
+                      'expected_profit_pct', 'risk_level']],
+                width='stretch', hide_index=True,
+            )
+
+        if services.get("llm") and services["llm"].available:
+            st.markdown("---")
+            section_header("🧠 DeepSeek AI 深度分析", "单金属专家级分析（约3-8秒）")
+            from config import METAL_TYPES
+            col_sel, col_go = st.columns([3, 1])
+            with col_sel:
+                llm_metal = st.selectbox(
+                    "选择分析金属", list(METAL_TYPES.keys()),
+                    key="llm_metal", label_visibility="collapsed",
+                )
+            with col_go:
+                if st.button("🚀 启动深度分析", type="primary", width='stretch'):
+                    with st.spinner(f"DeepSeek 正在分析 {llm_metal} ..."):
+                        llm_r = services["recommendation"].enrich_single_with_llm(llm_metal)
+                        if llm_r["success"]:
+                            res = llm_r["result"]
+                            st.success(f"**{res['action']}** | 信心 {res['confidence']:.0%}")
+                            st.markdown(res.get('llm_analysis', ''))
+                        else:
+                            st.error(f"分析失败: {llm_r['message']}")
+    except Exception as e:
+        st.warning(f"AI 分析引擎启动中，请稍后刷新...")
+
+
+# ═══════════════════════════════════════════════════════════
+#  📈 走势分析
+# ═══════════════════════════════════════════════════════════
+elif page == "📈 走势分析":
+    st.title("📈 价格走势分析")
+
+    from config import METAL_TYPES
+    c1, c2 = st.columns([2, 3])
+    with c1:
+        sel = st.selectbox("选择金属", list(METAL_TYPES.keys()),
+                           label_visibility="collapsed")
+    with c2:
+        days = st.slider("分析周期（天）", 7, 180, 90, label_visibility="collapsed")
+
+    df = get_history_cached(sel, days)
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df['date'], y=df['price'], mode='lines',
+        name=sel, line=dict(color='#C8923A', width=2.5),
+        fill='tozeroy', fillcolor='rgba(200,146,58,0.08)',
+    ))
+    if len(df) >= 7:
+        ma7 = df['price'].rolling(7).mean()
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=ma7, mode='lines',
+            name='MA7', line=dict(color='#3B82F6', width=1.2, dash='dot'),
+        ))
+    if len(df) >= 30:
+        ma30 = df['price'].rolling(30).mean()
+        fig.add_trace(go.Scatter(
+            x=df['date'], y=ma30, mode='lines',
+            name='MA30', line=dict(color='#EF4444', width=1.2, dash='dash'),
+        ))
+    styled_plotly(fig)
+    fig.update_layout(
+        title=f"{sel} 价格走势",
+        height=420, hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02),
+    )
+    st.plotly_chart(fig, width='stretch')
+
+    sc = st.columns(6)
+    sc[0].metric("现价", f"¥{df['price'].iloc[-1]:,.0f}")
+    sc[1].metric("最高", f"¥{df['price'].max():,.0f}")
+    sc[2].metric("最低", f"¥{df['price'].min():,.0f}")
+    sc[3].metric("均价", f"¥{df['price'].mean():,.0f}")
+    sc[4].metric("标准差", f"¥{df['price'].std():,.0f}")
+    chg = (df['price'].iloc[-1] - df['price'].iloc[0]) / df['price'].iloc[0] * 100
+    sc[5].metric("区间涨跌", f"{chg:+.2f}%")
+
+    st.markdown("---")
+    section_header("📊 多金属归一化对比", "")
+    cmps = st.multiselect(
+        "选择对比金属", list(METAL_TYPES.keys()),
+        default=['铜', '铝', '锌'], label_visibility="collapsed",
+    )
+    if cmps:
+        fig2 = go.Figure()
+        colors = ['#C8923A', '#3B82F6', '#10B981', '#EF4444',
+                  '#F59E0B', '#8B5CF6', '#D4832A', '#6B7280']
+        for i, m in enumerate(cmps):
+            dm = get_history_cached(m, days)
+            norm = dm['price'] / dm['price'].iloc[0] * 100
+            fig2.add_trace(go.Scatter(
+                x=dm['date'], y=norm, mode='lines',
+                name=m, line=dict(color=colors[i % len(colors)], width=1.8),
+            ))
+        styled_plotly(fig2)
+        fig2.update_layout(
+            title="归一化对比 (%)",
+            height=350, hovermode='x unified',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02),
+            yaxis=dict(ticksuffix='%'),
+        )
+        st.plotly_chart(fig2, width='stretch')
+
+
+# ═══════════════════════════════════════════════════════════
+#  🔔 价格预警
+# ═══════════════════════════════════════════════════════════
+elif page == "🔔 价格预警":
+    st.title("🔔 价格预警")
+
+    from config import METAL_TYPES
+    metals = list(METAL_TYPES.keys())
+
+    tab1, tab2 = st.tabs(["➕ 新建预警", "📋 活跃预警"])
+
+    with tab1:
+        c1, c2, c3 = st.columns(3)
+        am = c1.selectbox("金属", metals, key="am")
+        at = c2.selectbox("触发条件", ["高于", "低于"])
+        ap = c3.number_input("触发价格", min_value=0.01, step=100.0, value=50000.0)
+        amsg = st.text_input("备注", placeholder="预警备注...")
+        if st.button("✅ 创建预警", type="primary", width='stretch'):
+            r = services["alert"].create_alert(am, at, ap, amsg)
+            if r["success"]:
+                st.success(r["message"])
+            else:
+                st.error(r["message"])
+
+    with tab2:
+        alerts = services["alert"].get_active_alerts()
+        if alerts:
+            st.dataframe(pd.DataFrame(alerts), width='stretch', hide_index=True)
+            al_map = {
+                f"#{a['id']} {a['metal_type']} {a['alert_type']} ¥{a['trigger_price']}"
+                : a['id'] for a in alerts
+            }
+            sel_a = st.selectbox("选择要删除的预警", list(al_map.keys()),
+                                 label_visibility="collapsed")
+            if st.button("🗑️ 删除预警", width='stretch'):
+                r = services["alert"].delete_alert(al_map[sel_a])
+                if r["success"]:
+                    st.success(r["message"])
+                else:
+                    st.error(r["message"])
+        else:
+            empty_state("暂无活跃预警", "🔔")
+
+
+# ═══════════════════════════════════════════════════════════
+#  📋 交易记录
+# ═══════════════════════════════════════════════════════════
+elif page == "📋 交易记录":
+    st.title("📋 交易记录")
+
+    txns = get_transactions(100)
+    if txns:
+        df = pd.DataFrame(txns)
+        df['date'] = pd.to_datetime(df['date'])
+        buy = df[df['type'] == '买入']
+        sell = df[df['type'] == '卖出']
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: kpi_card("总交易数", str(len(df)), icon="📊")
+        with c2: kpi_card("买入笔数", str(len(buy)), icon="📥")
+        with c3: kpi_card("卖出笔数", str(len(sell)), icon="📤")
+        with c4: kpi_card("总利润", f"¥{sell['profit'].sum():,.0f}", icon="💎")
+
+        st.dataframe(
+            df[['date', 'type', 'metal', 'quantity_kg', 'price_per_kg',
+                'total', 'profit', 'counterparty']],
+            width='stretch', hide_index=True,
+        )
+    else:
+        empty_state("暂无交易记录", "📝")
+
+
+# ═══════════════════════════════════════════════════════════
+#  👥 客户供应商
+# ═══════════════════════════════════════════════════════════
+elif page == "👥 客户供应商":
+    st.title("👥 客户与供应商")
+
+    from database import Supplier, Customer
+    from config import METAL_TYPES
+    metals = list(METAL_TYPES.keys())
+
+    tab1, tab2 = st.tabs(["🏭 供应商", "🏪 客户"])
+
+    with tab1:
+        with st.expander("➕ 添加供应商"):
+            c1, c2 = st.columns(2)
+            sn = c1.text_input("公司名称", key="sn")
+            sc_contact = c1.text_input("联系人", key="sc")
+            sp = c2.text_input("电话", key="sp")
+            sa = c2.text_input("地址", key="sa")
+            sm = st.multiselect("供应金属品类", metals, key="sm")
+            sr = st.slider("信誉评级", 1, 5, 3, key="sr")
+            sno = st.text_area("备注", key="sno", placeholder="供应商备注...")
+            if st.button("✅ 添加供应商", width='stretch'):
+                session = services["session"]()
+                try:
+                    session.add(Supplier(
+                        name=sn, contact=sc_contact, phone=sp, address=sa,
+                        metal_types=",".join(sm), reliability=sr, notes=sno,
+                    ))
+                    session.commit()
+                    st.success(f"已添加供应商: {sn}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+                finally:
+                    session.close()
+
+        session = services["session"]()
+        try:
+            sups = session.query(Supplier).all()
+            if sups:
+                st.dataframe(pd.DataFrame([{
+                    "ID": s.id, "名称": s.name, "联系人": s.contact,
+                    "电话": s.phone, "主营金属": s.metal_types,
+                    "信誉": "⭐" * s.reliability,
+                } for s in sups]), width='stretch', hide_index=True)
+            else:
+                empty_state("暂无供应商数据", "🏭")
+        finally:
+            session.close()
+
+    with tab2:
+        with st.expander("➕ 添加客户"):
+            c1, c2 = st.columns(2)
+            cn = c1.text_input("公司名称", key="cn")
+            cc = c1.text_input("联系人", key="cc")
+            cp = c2.text_input("电话", key="cp")
+            ca = c2.text_input("地址", key="ca")
+            cm = st.multiselect("需求金属品类", metals, key="cm")
+            cr = st.slider("信用评级", 1, 5, 3, key="cr")
+            cno = st.text_area("备注", key="cno", placeholder="客户备注...")
+            if st.button("✅ 添加客户", width='stretch'):
+                session = services["session"]()
+                try:
+                    session.add(Customer(
+                        name=cn, contact=cc, phone=cp, address=ca,
+                        metal_types=",".join(cm), credit_rating=cr, notes=cno,
+                    ))
+                    session.commit()
+                    st.success(f"已添加客户: {cn}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
+                finally:
+                    session.close()
+
+        session = services["session"]()
+        try:
+            custs = session.query(Customer).all()
+            if custs:
+                st.dataframe(pd.DataFrame([{
+                    "ID": c.id, "名称": c.name, "联系人": c.contact,
+                    "电话": c.phone, "需求金属": c.metal_types,
+                    "信用": "⭐" * c.credit_rating,
+                } for c in custs]), width='stretch', hide_index=True)
+            else:
+                empty_state("暂无客户数据", "🏪")
+        finally:
+            session.close()
+
+
+# ═══════════════════════════════════════════════════════════
+#  📊 利润分析
+# ═══════════════════════════════════════════════════════════
+elif page == "📊 利润分析":
+    st.title("📊 利润分析")
+
+    p30 = get_profit_summary(30)
+    p90 = get_profit_summary(90)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        kpi_card("近30天利润", f"¥{p30['total_profit']:,.0f}",
+                 f"{p30['total_sell_transactions']}笔", icon="📅")
+    with c2:
+        kpi_card("近90天利润", f"¥{p90['total_profit']:,.0f}",
+                 f"{p90['total_sell_transactions']}笔", icon="📆")
+    with c3:
+        kpi_card("平均利润率", f"{p30['avg_profit_margin']:.2f}%", icon="🎯")
+
+    st.markdown("---")
+    section_header("📦 浮动盈亏", "各金属持仓盈亏明细")
+
+    inv = get_all_inventory()
+    if inv:
+        df_inv = pd.DataFrame(inv)
+
+        fig = px.bar(
+            df_inv, x='metal_type', y='profit_loss',
+            color='profit_loss',
+            color_continuous_scale=[
+                (0, '#EF4444'), (0.45, '#9CA3AF'), (0.5, '#6B7280'),
+                (0.55, '#9CA3AF'), (1, '#10B981')
+            ],
+            labels={'profit_loss': '浮动盈亏(元)', 'metal_type': '金属'},
+        )
+        fig.update_traces(marker=dict(line=dict(width=0)))
+        styled_plotly(fig)
+        fig.update_layout(height=350, showlegend=False)
+        st.plotly_chart(fig, width='stretch')
+
+        st.dataframe(
+            df_inv[['metal_type', 'quantity_kg', 'avg_cost_price',
+                    'current_market_price', 'profit_loss', 'profit_loss_pct']],
+            width='stretch', hide_index=True,
+        )
+    else:
+        empty_state("暂无库存", "📦")
+
+    st.markdown("---")
+    section_header("📈 投资回报率 (ROI)", "")
+    inv_s = get_inventory_summary()
+    if inv_s['total_cost'] > 0:
+        roi = inv_s['profit_pct']
+        roi_color = "#10B981" if roi >= 0 else "#EF4444"
+        st.markdown(
+            f'<div style="text-align:center;padding:20px;">'
+            f'<div style="font-size:0.85rem;color:#6B7280;margin-bottom:8px;">'
+            f'总投资回报率</div>'
+            f'<div style="font-size:2.2rem;font-weight:800;color:{roi_color};">'
+            f'{roi:+.2f}%</div>'
+            f'<div style="color:#9CA3AF;font-size:0.8rem;margin-top:4px;">'
+            f'目标: 30% | 当前: {roi:.2f}%</div></div>',
+            unsafe_allow_html=True,
+        )
+        st.progress(min(abs(roi) / 30, 1.0))
+    else:
+        empty_state("暂无投资数据", "💼")
+
+# ═══════════════════════════════════════════════════════════
+#  底部
+# ═══════════════════════════════════════════════════════════
+st.markdown("---")
+if services["price"].is_using_real_data:
+    last_up = services["price"].last_update_time
+    if last_up:
+        real_label = f"🟢 SHFE实时 · 更新于 {last_up.strftime('%H:%M:%S')}"
+    else:
+        real_label = "🟢 SHFE实时行情"
+else:
+    real_label = "🟡 本地模拟数据"
+st.markdown(
+    f'<div style="text-align:center;color:#9CA3AF;font-size:0.78rem;padding:4px 0;">'
+    f'🔩 Metal AI Trading System v3 · 13因子智能推荐 · {real_label}'
+    '</div>',
+    unsafe_allow_html=True,
+)
+
+# 移动端底部导航提示
+mobile_bottom_nav()

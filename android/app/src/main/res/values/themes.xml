@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主主题 - 金属交易风格 -->
+    <style name="Theme.MetalTrading" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">#C8923A</item>
+        <item name="colorPrimaryVariant">#B07E30</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#D4832A</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="android:statusBarColor">#C8923A</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <!-- 启动画面主题 -->
+    <style name="Theme.MetalTrading.Splash" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">#C8923A</item>
+        <item name="android:statusBarColor">#C8923A</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowBackground">#F5F6FA</item>
+    </style>
+</resources>

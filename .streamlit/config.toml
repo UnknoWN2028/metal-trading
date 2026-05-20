@@ -1,0 +1,15 @@
+[theme]
+primaryColor = "#C8923A"
+backgroundColor = "#F5F6FA"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1A1D26"
+font = "sans serif"
+
+[server]
+# Streamlit Cloud 会自动处理端口
+# 本地开发时使用这些设置
+port = 8501
+headless = true
+
+[browser]
+gatherUsageStats = false

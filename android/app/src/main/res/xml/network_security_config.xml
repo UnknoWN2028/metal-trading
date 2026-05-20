@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 允许所有域名的 HTTPS + HTTP（Streamlit Cloud 使用 HTTPS） -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- Streamlit Cloud 域名 -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">streamlit.app</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

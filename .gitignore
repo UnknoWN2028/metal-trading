@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+venv/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# 环境变量（含密钥）
+.env
+
+# Database (SQLite)
+*.db
+*.sqlite3
+*.db-journal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 密钥文件（防止误提交）
+*.pem
+*.key
+credentials.json
+
+# Data
+data/*.csv
+data/*.json
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.keystore
+android/*.jks
