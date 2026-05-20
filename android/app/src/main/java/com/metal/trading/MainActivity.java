@@ -25,11 +25,9 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 public class MainActivity extends Activity {
 
     // ═══════════════════════════════════════
-    //  ⚠️ 部署后修改此 URL
+    //  Streamlit Cloud 部署地址
     // ═══════════════════════════════════════
-    // Streamlit Cloud 部署后的 URL 格式：
-    // https://你的应用名.streamlit.app
-    private static final String APP_URL = "https://YOUR_APP_NAME.streamlit.app";
+    private static final String APP_URL = "https://metal-trading.streamlit.app";
 
     private WebView webView;
     private ProgressBar progressBar;
