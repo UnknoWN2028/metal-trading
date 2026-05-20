@@ -27,7 +27,7 @@ public class MainActivity extends Activity {
     // ═══════════════════════════════════════
     //  Streamlit Cloud 部署地址
     // ═══════════════════════════════════════
-    private static final String APP_URL = "https://metal-trading.streamlit.app";
+    private static final String APP_URL = "https://metal-trading-jsqvhzzatkdnzohufin9pu.streamlit.app";
 
     private WebView webView;
     private ProgressBar progressBar;
