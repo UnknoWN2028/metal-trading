@@ -36,6 +36,20 @@ st.set_page_config(
 )
 inject_css()
 
+# ── 移动端检测 JS ──
+st.markdown("""
+<script>
+(function() {
+    var w = window.innerWidth;
+    var div = document.createElement('div');
+    div.setAttribute('data-mobile-detected', w < 768 ? '1' : '0');
+    div.id = 'mobile-detector';
+    div.style.display = 'none';
+    document.body.appendChild(div);
+})();
+</script>
+""", unsafe_allow_html=True)
+
 # ═══════════════════════════════════════════════════════════
 #  服务初始化
 # ═══════════════════════════════════════════════════════════
@@ -458,27 +472,15 @@ elif page == "💰 实时行情":
         if s:
             chg_day = s['change_day']
             chg_color = "normal" if chg_day >= 0 else "inverse"
-            cols_top = st.columns([2, 1, 1, 1, 1])
-            with cols_top[0]:
-                kpi_card("💰 当前价格", f"¥{s['current_price']:,.0f}",
-                         f"{s['change_day']:+.2f}% (日)",
-                         delta_color=chg_color, icon=sel)
-            with cols_top[1]:
-                kpi_card("周涨跌", f"{s['change_week']:+.2f}%")
-            with cols_top[2]:
-                kpi_card("月涨跌", f"{s['change_month']:+.2f}%")
-            with cols_top[3]:
-                kpi_card("波动率", f"{s['volatility']:.2f}%")
-            with cols_top[4]:
-                trend_icon = "📈" if s['trend'] == "上涨" else "📉"
-                kpi_card("趋势", s['trend'], f"强度 {s['trend_strength']}%",
-                         icon=trend_icon)
-
-            cols_mid = st.columns(4)
-            cols_mid[0].metric("MA7", f"¥{s['ma7']:,.0f}")
-            cols_mid[1].metric("MA30", f"¥{s['ma30']:,.0f}")
-            cols_mid[2].metric("支撑位", f"¥{s['support']:,.0f}")
-            cols_mid[3].metric("阻力位", f"¥{s['resistance']:,.0f}")
+            # 统一使用 mobile_kpi_row：桌面端5列，移动端2列
+            mobile_kpi_row([
+                ("💰 当前价格", f"¥{s['current_price']:,.0f}", f"{s['change_day']:+.2f}%", chg_color, sel),
+                ("周涨跌", f"{s['change_week']:+.2f}%", None, "normal", "📅"),
+                ("月涨跌", f"{s['change_month']:+.2f}%", None, "normal", "📆"),
+                ("波动率", f"{s['volatility']:.2f}%", None, "normal", "📊"),
+                ("趋势", s['trend'], None, "normal", "📈" if s['trend'] == "上涨" else "📉"),
+            ], cols_per_row=2)
+            st.caption(f"MA7: ¥{s['ma7']:,.0f} | MA30: ¥{s['ma30']:,.0f} | 支撑: ¥{s['support']:,.0f} | 阻力: ¥{s['resistance']:,.0f}")
 
             st.caption(f"数据源: {s['source']} | 更新: {s.get('timestamp', '')}")
 
@@ -688,14 +690,16 @@ elif page == "📈 走势分析":
     )
     st.plotly_chart(fig, width='stretch')
 
-    sc = st.columns(6)
-    sc[0].metric("现价", f"¥{df['price'].iloc[-1]:,.0f}")
-    sc[1].metric("最高", f"¥{df['price'].max():,.0f}")
-    sc[2].metric("最低", f"¥{df['price'].min():,.0f}")
-    sc[3].metric("均价", f"¥{df['price'].mean():,.0f}")
-    sc[4].metric("标准差", f"¥{df['price'].std():,.0f}")
-    chg = (df['price'].iloc[-1] - df['price'].iloc[0]) / df['price'].iloc[0] * 100
-    sc[5].metric("区间涨跌", f"{chg:+.2f}%")
+            # 走势统计：使用 mobile_kpi_row 统一布局
+            chg = (df['price'].iloc[-1] - df['price'].iloc[0]) / df['price'].iloc[0] * 100
+            mobile_kpi_row([
+                ("现价", f"¥{df['price'].iloc[-1]:,.0f}", None, "normal", "💵"),
+                ("最高", f"¥{df['price'].max():,.0f}", None, "normal", "🔺"),
+                ("最低", f"¥{df['price'].min():,.0f}", None, "normal", "🔻"),
+                ("均价", f"¥{df['price'].mean():,.0f}", None, "normal", "📊"),
+                ("标准差", f"¥{df['price'].std():,.0f}", None, "normal", "📐"),
+                ("区间涨跌", f"{chg:+.2f}%", None, "normal", "📈"),
+            ], cols_per_row=3)
 
     st.markdown("---")
     section_header("📊 多金属归一化对比", "")
@@ -781,11 +785,12 @@ elif page == "📋 交易记录":
         buy = df[df['type'] == '买入']
         sell = df[df['type'] == '卖出']
 
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: kpi_card("总交易数", str(len(df)), icon="📊")
-        with c2: kpi_card("买入笔数", str(len(buy)), icon="📥")
-        with c3: kpi_card("卖出笔数", str(len(sell)), icon="📤")
-        with c4: kpi_card("总利润", f"¥{sell['profit'].sum():,.0f}", icon="💎")
+        mobile_kpi_row([
+            ("总交易数", str(len(df)), None, "normal", "📊"),
+            ("买入笔数", str(len(buy)), None, "normal", "📥"),
+            ("卖出笔数", str(len(sell)), None, "normal", "📤"),
+            ("总利润", f"¥{sell['profit'].sum():,.0f}", None, "normal", "💎"),
+        ], cols_per_row=2)
 
         st.dataframe(
             df[['date', 'type', 'metal', 'quantity_kg', 'price_per_kg',
@@ -896,15 +901,11 @@ elif page == "📊 利润分析":
     p30 = get_profit_summary(30)
     p90 = get_profit_summary(90)
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        kpi_card("近30天利润", f"¥{p30['total_profit']:,.0f}",
-                 f"{p30['total_sell_transactions']}笔", icon="📅")
-    with c2:
-        kpi_card("近90天利润", f"¥{p90['total_profit']:,.0f}",
-                 f"{p90['total_sell_transactions']}笔", icon="📆")
-    with c3:
-        kpi_card("平均利润率", f"{p30['avg_profit_margin']:.2f}%", icon="🎯")
+    mobile_kpi_row([
+        ("近30天利润", f"¥{p30['total_profit']:,.0f}", f"{p30['total_sell_transactions']}笔", "normal", "📅"),
+        ("近90天利润", f"¥{p90['total_profit']:,.0f}", f"{p90['total_sell_transactions']}笔", "normal", "📆"),
+        ("平均利润率", f"{p30['avg_profit_margin']:.2f}%", None, "normal", "🎯"),
+    ], cols_per_row=2)
 
     st.markdown("---")
     section_header("📦 浮动盈亏", "各金属持仓盈亏明细")

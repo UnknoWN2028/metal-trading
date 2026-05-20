@@ -320,78 +320,104 @@ hr {
 @media (max-width: 768px) {
     /* 全局 */
     .main .block-container {
-        padding: 0.8rem 0.6rem !important;
+        padding: 0.6rem 0.5rem 4.5rem 0.5rem !important;
+    }
+    /* iOS 安全区域 */
+    @supports (padding: env(safe-area-inset-bottom)) {
+        .main .block-container {
+            padding-bottom: calc(4.5rem + env(safe-area-inset-bottom)) !important;
+        }
     }
 
     /* 标题 */
-    h1 { font-size: 1.25rem !important; padding-bottom: 0.3rem; margin-bottom: 0.6rem; }
-    h2 { font-size: 1.05rem !important; }
-    h3 { font-size: 0.95rem !important; }
-    h4 { font-size: 0.85rem !important; }
+    h1 { font-size: 1.15rem !important; padding-bottom: 0.25rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1rem !important; }
+    h3 { font-size: 0.9rem !important; }
+    h4 { font-size: 0.82rem !important; }
 
-    /* 侧边栏 */
+    /* 侧边栏 — 更宽、全屏滑出 */
     [data-testid="stSidebar"] {
-        min-width: 260px !important;
-        max-width: 85vw !important;
+        min-width: 280px !important;
+        max-width: 88vw !important;
     }
     [data-testid="stSidebar"] .block-container {
-        padding: 0.5rem 0.8rem !important;
+        padding: 0.4rem 0.6rem !important;
     }
 
     /* 导航 — 加大触控区 */
     div[role="radiogroup"] > label {
         padding: 12px 14px !important;
-        font-size: 0.95rem !important;
-        min-height: 44px;
+        font-size: 0.92rem !important;
+        min-height: 48px;
         display: flex !important;
         align-items: center;
+        border-radius: 10px !important;
+        margin-bottom: 3px !important;
     }
 
-    /* KPI 卡片 */
+    /* KPI 卡片 — 2列网格 */
     [data-testid="stMetric"] {
         padding: 10px 12px !important;
         border-radius: 8px;
     }
     [data-testid="stMetricLabel"] {
-        font-size: 0.7rem !important;
+        font-size: 0.68rem !important;
     }
     [data-testid="stMetricValue"] {
-        font-size: 1.1rem !important;
+        font-size: 1.05rem !important;
     }
     [data-testid="stMetricDelta"] {
-        font-size: 0.75rem !important;
+        font-size: 0.72rem !important;
     }
 
     /* 按钮 — 全宽 + 大触控区 */
     .stButton > button {
-        padding: 10px 16px !important;
-        min-height: 44px;
-        font-size: 0.9rem !important;
+        padding: 11px 16px !important;
+        min-height: 48px;
+        font-size: 0.92rem !important;
         width: 100% !important;
+        border-radius: 10px !important;
     }
 
-    /* 表格 — 横向滚动 */
+    /* 表格 — 横向滚动 + 粘性首列 */
     .stDataFrame {
         overflow-x: auto !important;
         -webkit-overflow-scrolling: touch;
+        border-radius: 8px;
     }
     .stDataFrame thead th {
-        font-size: 0.7rem !important;
+        font-size: 0.68rem !important;
         padding: 6px 8px !important;
         white-space: nowrap;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+    }
+    .stDataFrame thead th:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 3;
     }
     .stDataFrame tbody td {
-        font-size: 0.78rem !important;
+        font-size: 0.76rem !important;
         padding: 6px 8px !important;
     }
+    .stDataFrame tbody td:first-child {
+        position: sticky;
+        left: 0;
+        background: #FFFFFF !important;
+        z-index: 1;
+        font-weight: 600;
+    }
 
-    /* Tabs — 全宽 */
+    /* Tabs — 全宽可滑动 */
     .stTabs [data-baseweb="tab"] {
-        padding: 10px 12px !important;
+        padding: 10px 14px !important;
         font-size: 0.82rem !important;
-        min-height: 44px;
+        min-height: 48px;
         flex: 1;
         text-align: center;
+        border-radius: 10px 10px 0 0 !important;
     }
     .stTabs [data-baseweb="tab-list"] {
         display: flex;
@@ -399,56 +425,120 @@ hr {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
         gap: 2px;
+        scrollbar-width: none;
     }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
 
     /* Expander */
     .streamlit-expanderHeader {
-        padding: 10px 12px !important;
-        font-size: 0.82rem !important;
-        min-height: 44px;
+        padding: 12px 14px !important;
+        font-size: 0.85rem !important;
+        min-height: 48px;
+        border-radius: 10px !important;
     }
 
-    /* Select / Input */
+    /* Select / Input — 大触控区 */
     .stSelectbox [data-baseweb="select"] > div,
     .stTextInput input, .stNumberInput input {
-        font-size: 0.95rem !important;
-        min-height: 44px;
-        padding: 8px 12px !important;
+        font-size: 16px !important;  /* 防止 iOS 缩放 */
+        min-height: 48px;
+        padding: 10px 14px !important;
+        border-radius: 10px !important;
     }
     .stTextArea textarea {
-        font-size: 0.95rem !important;
+        font-size: 16px !important;
+        border-radius: 10px !important;
+    }
+
+    /* Multiselect */
+    .stMultiSelect [data-baseweb="select"] > div {
+        font-size: 16px !important;
+        min-height: 48px;
     }
 
     /* Divider */
     hr {
-        margin: 0.8rem 0 !important;
+        margin: 0.6rem 0 !important;
     }
 
-    /* Plotly 图表 */
+    /* Plotly 图表 — 移动端优化 */
     .js-plotly-plot {
         max-width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .js-plotly-plot .plotly .modebar {
+        opacity: 1 !important;  /* 移动端始终显示工具栏 */
     }
 
     /* 快讯卡片 */
     .stCaption {
-        font-size: 0.72rem !important;
+        font-size: 0.7rem !important;
+    }
+
+    /* 推荐卡片 */
+    .rec-card {
+        padding: 10px 12px !important;
+        margin: 4px 0 !important;
+    }
+
+    /* 评分明细卡片 */
+    .rec-card + div .streamlit-expanderHeader {
+        margin-top: -4px;
+        border-top-left-radius: 0 !important;
+        border-top-right-radius: 0 !important;
+    }
+
+    /* Slider */
+    .stSlider {
+        padding-top: 6px !important;
+    }
+    .stSlider [role="slider"] {
+        width: 22px !important;
+        height: 22px !important;
+    }
+
+    /* Checkbox */
+    .stCheckbox label {
+        font-size: 0.88rem !important;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+    }
+
+    /* Radio */
+    .stRadio label {
+        min-height: 44px;
+    }
+
+    /* 消息 Toast 提示 — 顶部悬浮 */
+    [data-testid="stToast"] {
+        top: 10px !important;
+        right: 10px !important;
+        left: 10px !important;
+        max-width: calc(100vw - 20px) !important;
     }
 }
 
 /* ── 手机 (< 480px) ── */
 @media (max-width: 480px) {
     .main .block-container {
-        padding: 0.4rem 0.3rem !important;
+        padding: 0.3rem 0.25rem 4.2rem 0.25rem !important;
+    }
+    @supports (padding: env(safe-area-inset-bottom)) {
+        .main .block-container {
+            padding-bottom: calc(4.2rem + env(safe-area-inset-bottom)) !important;
+        }
     }
 
-    h1 { font-size: 1.15rem !important; }
-    h2 { font-size: 0.95rem !important; }
-    h3 { font-size: 0.88rem !important; }
+    h1 { font-size: 1.1rem !important; }
+    h2 { font-size: 0.9rem !important; }
+    h3 { font-size: 0.85rem !important; }
 
-    /* 侧边栏更窄 */
+    /* 侧边栏 */
     [data-testid="stSidebar"] {
-        min-width: 240px !important;
-        max-width: 90vw !important;
+        min-width: 260px !important;
+        max-width: 92vw !important;
     }
 
     /* KPI 进一步缩小 */
@@ -457,24 +547,32 @@ hr {
         border-radius: 6px;
     }
     [data-testid="stMetricValue"] {
-        font-size: 1rem !important;
+        font-size: 0.95rem !important;
     }
 
     /* 导航 */
     div[role="radiogroup"] > label {
-        padding: 12px 12px !important;
+        padding: 11px 12px !important;
         font-size: 0.88rem !important;
+        min-height: 46px;
     }
 
     /* 表格 */
-    .stDataFrame thead th { font-size: 0.65rem !important; }
-    .stDataFrame tbody td { font-size: 0.72rem !important; }
+    .stDataFrame thead th { font-size: 0.62rem !important; }
+    .stDataFrame tbody td { font-size: 0.7rem !important; }
 
     /* Tabs */
     .stTabs [data-baseweb="tab"] {
-        padding: 8px 8px !important;
+        padding: 8px 10px !important;
         font-size: 0.75rem !important;
+        min-height: 44px;
         white-space: nowrap;
+    }
+
+    /* 推荐卡片 */
+    .rec-card {
+        padding: 8px 10px !important;
+        border-left-width: 3px !important;
     }
 }
 """
@@ -558,32 +656,220 @@ def mobile_kpi_row(items: list, cols_per_row: int = 2):
 
 
 def mobile_bottom_nav():
-    """移动端底部导航提示（通过 JS 检测并显示）"""
+    """
+    移动端底部导航栏 — 可交互的实际导航按钮
+    通过 JS 模拟点击侧边栏中的 radio 按钮来切换页面
+    """
     st.markdown(
         """
         <style>
+        /* 移动端底部导航栏 */
         @media (max-width: 768px) {
-            .mobile-nav-hint {
+            .mobile-bottom-bar {
+                display: flex !important;
+            }
+            .mobile-top-toolbar {
                 display: flex !important;
             }
         }
-        .mobile-nav-hint {
+        .mobile-bottom-bar {
             display: none;
             position: fixed;
             bottom: 0; left: 0; right: 0;
             background: #FFFFFF;
             border-top: 1px solid #E2E5EE;
-            padding: 6px 12px;
-            z-index: 999;
-            font-size: 0.68rem;
-            color: #9CA3AF;
+            z-index: 99999;
+            padding: 4px 4px;
+            padding-bottom: env(safe-area-inset-bottom, 4px);
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.06);
+            justify-content: space-around;
+            align-items: center;
+        }
+        .mobile-bottom-bar .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 2px;
+            min-width: 50px;
+            flex: 1;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            border-radius: 8px;
+            transition: background 0.15s;
+            text-decoration: none;
+        }
+        .mobile-bottom-bar .nav-item:active {
+            background: #F0F4FF;
+        }
+        .mobile-bottom-bar .nav-icon {
+            font-size: 1.2rem;
+            line-height: 1;
+            margin-bottom: 1px;
+        }
+        .mobile-bottom-bar .nav-label {
+            font-size: 0.58rem;
+            color: #6B7280;
+            font-weight: 500;
+            line-height: 1;
+            white-space: nowrap;
+        }
+
+        /* 移动端顶部工具栏 */
+        .mobile-top-toolbar {
+            display: none;
+            position: sticky;
+            top: 0;
+            z-index: 9999;
+            background: #FFFFFF;
+            padding: 6px 8px;
+            margin: -0.3rem -0.25rem 0.4rem -0.25rem;
+            border-bottom: 1px solid #E2E5EE;
+            gap: 6px;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        }
+        .mobile-top-toolbar .toolbar-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #1A1D26;
+            flex: 1;
             text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .mobile-top-toolbar .toolbar-btn {
+            background: #F9FAFB;
+            border: 1px solid #E2E5EE;
+            border-radius: 8px;
+            padding: 6px 10px;
+            font-size: 0.95rem;
+            cursor: pointer;
+            min-width: 36px;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            transition: all 0.15s;
+        }
+        .mobile-top-toolbar .toolbar-btn:active {
+            background: #F0F4FF;
+            border-color: #C8923A;
+        }
+
+        /* 页面底部留白 — 给底部导航让路 */
+        @media (max-width: 768px) {
+            footer { display: none !important; }
+            #MainMenu { display: none !important; }
+        }
+        
+        /* 移动端下拉刷新指示器 */
+        @media (max-width: 768px) {
+            .pull-indicator {
+                display: block !important;
+            }
+        }
+        .pull-indicator {
+            display: none;
+            text-align: center;
+            padding: 4px 0 2px 0;
+            color: #9CA3AF;
+            font-size: 0.62rem;
             pointer-events: none;
         }
         </style>
-        <div class="mobile-nav-hint">
-            ☰ 左上角菜单切换页面 · 下拉刷新行情
+
+        <!-- 移动端顶部工具栏 -->
+        <div class="mobile-top-toolbar">
+            <div class="toolbar-btn" onclick="
+                var sb = window.parent.document.querySelector('[data-testid=\"stSidebar\"]');
+                if(sb) {
+                    var btn = sb.querySelector('button[aria-label=\"Close sidebar\"], button[kind=\"header\"]');
+                    if(btn) btn.click(); else {
+                        var hamburger = window.parent.document.querySelector('button[kind=\"header\"][data-testid=\"baseButton-header\"]');
+                        if(!hamburger) hamburger = window.parent.document.querySelector('[data-testid=\"collapsedControl\"]');
+                        if(hamburger) hamburger.click();
+                    }
+                }
+            " title="菜单">☰</div>
+            <div class="toolbar-title" id="mobile-page-title">仪表盘</div>
+            <div class="toolbar-btn" onclick="
+                var btns = window.parent.document.querySelectorAll('button');
+                for(var i=0;i<btns.length;i++){
+                    if(btns[i].textContent.includes('强制刷新')||btns[i].textContent.includes('刷新')){
+                        btns[i].click();break;
+                    }
+                }
+            " title="刷新">🔄</div>
         </div>
+
+        <!-- 移动端底部导航 -->
+        <div class="mobile-bottom-bar">
+            <div class="nav-item" onclick="switchMobilePage('📊 仪表盘')">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">仪表盘</span>
+            </div>
+            <div class="nav-item" onclick="switchMobilePage('💰 实时行情')">
+                <span class="nav-icon">💰</span>
+                <span class="nav-label">行情</span>
+            </div>
+            <div class="nav-item" onclick="switchMobilePage('🤖 AI推荐')">
+                <span class="nav-icon">🤖</span>
+                <span class="nav-label">AI推荐</span>
+            </div>
+            <div class="nav-item" onclick="switchMobilePage('📦 库存管理')">
+                <span class="nav-icon">📦</span>
+                <span class="nav-label">库存</span>
+            </div>
+            <div class="nav-item" onclick="switchMobilePage('📈 走势分析')">
+                <span class="nav-icon">📈</span>
+                <span class="nav-label">走势</span>
+            </div>
+        </div>
+
+        <!-- 下拉刷新提示 -->
+        <div class="pull-indicator">⬇️ 下拉刷新行情</div>
+
+        <!-- 底部导航 JS 逻辑 -->
+        <script>
+        function switchMobilePage(pageName) {
+            // 更新顶部标题
+            var titleEl = document.getElementById('mobile-page-title');
+            if (titleEl) {
+                var shortName = pageName.replace(/^[^ ]+ /, '');
+                titleEl.textContent = shortName;
+            }
+            // 在侧边栏中找到对应 radio 并点击
+            var sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+            if (!sidebar) return;
+            var labels = sidebar.querySelectorAll('div[role="radiogroup"] label');
+            for (var i = 0; i < labels.length; i++) {
+                if (labels[i].textContent.includes(pageName.replace(/^[^ ]+ /, ''))) {
+                    labels[i].click();
+                    break;
+                }
+            }
+        }
+
+        // 监听页面标题变化，自动更新移动端标题
+        (function() {
+            var lastTitle = '';
+            setInterval(function() {
+                var h1 = window.parent.document.querySelector('h1');
+                var current = h1 ? h1.textContent.trim() : '';
+                if (current && current !== lastTitle) {
+                    lastTitle = current;
+                    var titleEl = document.getElementById('mobile-page-title');
+                    if (titleEl) titleEl.textContent = current.replace(/^[^ ]+ /, '');
+                }
+            }, 500);
+        })();
+        </script>
         """,
         unsafe_allow_html=True,
     )
