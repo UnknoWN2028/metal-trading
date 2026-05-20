@@ -29,4 +29,4 @@ sys.path.insert(0, str(Path(__file__).parent))
 app_file = Path(__file__).parent / "web" / "app.py"
 with open(app_file, "r", encoding="utf-8") as f:
     code = compile(f.read(), str(app_file), "exec")
-    exec(code, {"__name__": "__main__"})
+    exec(code, {"__name__": "__main__", "__file__": str(app_file)})
