@@ -690,16 +690,16 @@ elif page == "📈 走势分析":
     )
     st.plotly_chart(fig, width='stretch')
 
-            # 走势统计：使用 mobile_kpi_row 统一布局
-            chg = (df['price'].iloc[-1] - df['price'].iloc[0]) / df['price'].iloc[0] * 100
-            mobile_kpi_row([
-                ("现价", f"¥{df['price'].iloc[-1]:,.0f}", None, "normal", "💵"),
-                ("最高", f"¥{df['price'].max():,.0f}", None, "normal", "🔺"),
-                ("最低", f"¥{df['price'].min():,.0f}", None, "normal", "🔻"),
-                ("均价", f"¥{df['price'].mean():,.0f}", None, "normal", "📊"),
-                ("标准差", f"¥{df['price'].std():,.0f}", None, "normal", "📐"),
-                ("区间涨跌", f"{chg:+.2f}%", None, "normal", "📈"),
-            ], cols_per_row=3)
+    # 走势统计：使用 mobile_kpi_row 统一布局
+    chg = (df['price'].iloc[-1] - df['price'].iloc[0]) / df['price'].iloc[0] * 100
+    mobile_kpi_row([
+        ("现价", f"¥{df['price'].iloc[-1]:,.0f}", None, "normal", "💵"),
+        ("最高", f"¥{df['price'].max():,.0f}", None, "normal", "🔺"),
+        ("最低", f"¥{df['price'].min():,.0f}", None, "normal", "🔻"),
+        ("均价", f"¥{df['price'].mean():,.0f}", None, "normal", "📊"),
+        ("标准差", f"¥{df['price'].std():,.0f}", None, "normal", "📐"),
+        ("区间涨跌", f"{chg:+.2f}%", None, "normal", "📈"),
+    ], cols_per_row=3)
 
     st.markdown("---")
     section_header("📊 多金属归一化对比", "")
