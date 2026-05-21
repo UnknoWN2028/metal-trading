@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  metal-app:
+    build: .
+    container_name: metal-trading
+    ports:
+      - "8501:8501"
+    volumes:
+      # 持久化数据库文件
+      - ./data:/app/data
+      - metal_db:/app  # 让 *.db 文件保留在容器内
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+
+volumes:
+  metal_db:

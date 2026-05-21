@@ -12,18 +12,31 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
+
+        // ═══ Streamlit Cloud 部署地址 ═══
+        buildConfigField 'String', 'APP_URL', '"https://metal-trading-jsqvhzzatkdnzohufin9pu.streamlit.app"'
     }
 
     buildTypes {
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 使用 debug 签名（个人使用直接安装即可）
+            signingConfig signingConfigs.debug
+        }
+        debug {
+            // 调试版也连 Streamlit Cloud（真机测试用）
+            buildConfigField 'String', 'APP_URL', '"https://metal-trading-jsqvhzzatkdnzohufin9pu.streamlit.app"'
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 }
 
