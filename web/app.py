@@ -37,25 +37,6 @@ st.set_page_config(
 )
 inject_css()
 
-# ═══════════════════════════════════════════════════════════
-#  移动端页面切换：顶层读取URL参数（必须放在所有widget之前）
-# ═══════════════════════════════════════════════════════════
-PAGE_KEY = "nav_page"
-if PAGE_KEY not in st.session_state:
-    st.session_state[PAGE_KEY] = "📊 仪表盘"
-_qp = st.query_params
-if "p" in _qp:
-    code = _qp["p"]
-    page_map = {
-        "db": "📊 仪表盘", "hq": "💰 实时行情", "kc": "📦 库存管理",
-        "ai": "🤖 AI推荐", "zs": "📈 走势分析", "yj": "🔔 价格预警",
-        "jy": "📋 交易记录", "kh": "👥 客户供应商", "lr": "📊 利润分析",
-    }
-    target = page_map.get(code, "📊 仪表盘")
-    if st.session_state[PAGE_KEY] != target:
-        st.session_state[PAGE_KEY] = target
-        st.query_params.clear()
-
 # ── 移动端检测 JS ──
 st.markdown("""
 <script>
@@ -1028,4 +1009,4 @@ st.markdown(
 )
 
 # 移动端底部导航提示
-mobile_bottom_nav()
+# (已移除)
