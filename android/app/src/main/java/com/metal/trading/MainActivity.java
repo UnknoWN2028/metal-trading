@@ -122,10 +122,6 @@ public class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 pageFinished = true;
                 progressBar.setVisibility(View.GONE);
-                // 🆕 页面加载完，如果滚动在顶部则启用下拉刷新
-                if (view.getScrollY() == 0) {
-                    swipeRefresh.setEnabled(true);
-                }
             }
 
             @Override
@@ -232,8 +228,6 @@ public class MainActivity extends Activity {
                 + "<p style='color:#4B5563;font-size:11px;margin-top:8px;word-break:break-all;max-width:280px;'>"
                 + appUrl + "</p></body></html>";
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
-        // 🆕 离线页允许下拉刷新重试
-        swipeRefresh.setEnabled(true);
     }
 
     private void showUrlDialog() {
