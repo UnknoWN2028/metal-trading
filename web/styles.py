@@ -839,37 +839,26 @@ def mobile_bottom_nav():
         <!-- 下拉刷新提示 -->
         <div class="pull-indicator">下拉刷新</div>
 
-        <!-- 🆕 底部导航 JS：找到Streamlit侧边栏radio并点击 -->
+        <!-- 🆕 底部导航 JS：URL参数切换（顶层Python读取） -->
         <script>
-        var PAGE_LABELS = ['仪表盘','行情','AI推荐','库存','走势'];
-        var PAGE_FULL = ['📊 仪表盘','💰 实时行情','🤖 AI推荐','📦 库存管理','📈 走势分析'];
+        var PAGE_MAP = { '仪表盘':'db', '实时行情':'hq', 'AI推荐':'ai', '库存管理':'kc', '走势分析':'zs' };
         function switchPage(name) {
-            // 找侧边栏中所有label元素
-            var allLabels = document.querySelectorAll('label');
-            for (var i = 0; i < allLabels.length; i++) {
-                var txt = allLabels[i].textContent || '';
-                if (txt.indexOf(name) >= 0) {
-                    allLabels[i].click();
-                    return;
-                }
-            }
-            // fallback: 找role=radio
-            var radios = document.querySelectorAll('[role="radio"]');
-            for (var i = 0; i < radios.length; i++) {
-                var txt = radios[i].textContent || '';
-                if (txt.indexOf(name) >= 0) {
-                    radios[i].click();
-                    return;
-                }
-            }
+            var code = PAGE_MAP[name] || 'db';
+            var url = new URL(window.location.href);
+            url.searchParams.set('p', code);
+            window.location.href = url.toString();
         }
         (function() {
+            var params = new URLSearchParams(window.location.search);
+            var current = params.get('p') || 'db';
+            var reverse = { 'db':'仪表盘','hq':'实时行情','ai':'AI推荐','kc':'库存管理','zs':'走势分析' };
+            var currentName = reverse[current] || '仪表盘';
             var items = document.querySelectorAll('.nav-item');
             items.forEach(function(item) {
-                item.addEventListener('click', function() {
-                    items.forEach(function(i) { i.classList.remove('active'); });
+                var label = item.querySelector('.nav-label');
+                if (label && label.textContent.trim() === currentName) {
                     item.classList.add('active');
-                });
+                }
             });
         })();
         </script>
