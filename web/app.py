@@ -91,9 +91,7 @@ if "_auto_connected" not in st.session_state:
         else:
             _safe_toast(f"⚠️ {result.get('message', 'SHFE连接失败')}")
         # 🆕 轻量刷新：不清除所有缓存，仅刷新侧边栏
-        st.session_state.pop("_sidebar_prices", None)
-        st.session_state.pop("_sidebar_news", None)
-        st.session_state.pop("_sidebar_fetch_ts", None)
+        _invalidate_sidebar()
         st.rerun()
 
 
@@ -160,23 +158,27 @@ def get_news_headlines(limit=8):
 
 
 # ═══════════════════════════════════════════════════════════
-#  🆕 侧边栏数据预取（存入session_state避免切页重算）
+#  侧边栏数据缓存（版本号驱动，避免时间TTL盲区）
 # ═══════════════════════════════════════════════════════════
-SIDEBAR_CACHE_TTL = 300  # 侧边栏数据刷新间隔（秒）
-_now_ts = datetime.now().timestamp()
-_last_sidebar_fetch = st.session_state.get("_sidebar_fetch_ts", 0)
-_sidebar_stale = (_now_ts - _last_sidebar_fetch) > SIDEBAR_CACHE_TTL
-
-if "_sidebar_prices" not in st.session_state or _sidebar_stale:
+def _sidebar_fetch():
+    """统一获取侧边栏价格+快讯，结果存入session_state"""
     try:
         st.session_state["_sidebar_prices"] = get_cached_prices()
         st.session_state["_sidebar_news"] = get_news_headlines(5)
-        st.session_state["_sidebar_fetch_ts"] = _now_ts
+        st.session_state["_sidebar_ver"] = st.session_state.get("_price_ver", 0)
     except Exception:
-        if "_sidebar_prices" not in st.session_state:
-            st.session_state["_sidebar_prices"] = []
-        if "_sidebar_news" not in st.session_state:
-            st.session_state["_sidebar_news"] = []
+        st.session_state.setdefault("_sidebar_prices", [])
+        st.session_state.setdefault("_sidebar_news", [])
+
+def _invalidate_sidebar():
+    """标脏侧边栏缓存，下次渲染时自动刷新"""
+    st.session_state["_price_ver"] = st.session_state.get("_price_ver", 0) + 1
+
+# 首次或版本过期时刷新
+_cur_ver = st.session_state.get("_price_ver", 0)
+_cached_ver = st.session_state.get("_sidebar_ver", -1)
+if "_sidebar_prices" not in st.session_state or _cur_ver != _cached_ver:
+    _sidebar_fetch()
 
 _sidebar_prices = st.session_state.get("_sidebar_prices", [])
 _sidebar_news = st.session_state.get("_sidebar_news", [])
@@ -222,11 +224,13 @@ with st.sidebar:
                     else:
                         _safe_toast(f"⚠️ {refresh_r['message']}")
                     st.cache_data.clear()
+                    _invalidate_sidebar()
                     st.rerun()
         with col_r2:
             if st.button("📴 模拟", width='stretch'):
                 services["price"].use_simulated()
                 st.cache_data.clear()
+                _invalidate_sidebar()
                 st.rerun()
     else:
         st.warning("📀 本地模拟数据")
@@ -239,6 +243,7 @@ with st.sidebar:
                 else:
                     _safe_toast(f"⚠️ {result.get('message', '连接失败')}")
                 st.cache_data.clear()
+                _invalidate_sidebar()
                 st.rerun()
 
     # LLM
@@ -311,20 +316,15 @@ with st.sidebar:
     col_r, col_v = st.columns([3, 2])
     with col_r:
         if st.button("🔄 强制刷新", width='stretch'):
-            # 完全清缓存 + 重算
             st.cache_data.clear()
-            st.session_state.pop("_sidebar_prices", None)
-            st.session_state.pop("_sidebar_news", None)
-            st.session_state.pop("_sidebar_fetch_ts", None)
+            _invalidate_sidebar()
             st.rerun()
         # 🆕 轻量刷新按钮（仅刷新价格+快讯，不重算AI，不跳页）
         lite_clicked = st.button("LITE", width='stretch',
                                  key="_lite_refresh",
                                  help="轻量刷新（仅更新侧边栏数据）")
         if lite_clicked:
-            st.session_state.pop("_sidebar_prices", None)
-            st.session_state.pop("_sidebar_news", None)
-            st.session_state.pop("_sidebar_fetch_ts", None)
+            _invalidate_sidebar()
             st.rerun()
     with col_v:
         st.caption(datetime.now().strftime("%H:%M"))
