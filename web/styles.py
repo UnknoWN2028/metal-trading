@@ -814,101 +814,50 @@ def mobile_bottom_nav():
 
         <!-- 移动端底部导航 -->
         <div class="mobile-bottom-bar">
-            <div class="nav-item" onclick="switchMobilePage('📊 仪表盘')">
+            <div class="nav-item" onclick="switchPage('仪表盘')">
                 <span class="nav-icon">📊</span>
                 <span class="nav-label">仪表盘</span>
             </div>
-            <div class="nav-item" onclick="switchMobilePage('💰 实时行情')">
+            <div class="nav-item" onclick="switchPage('实时行情')">
                 <span class="nav-icon">💰</span>
                 <span class="nav-label">行情</span>
             </div>
-            <div class="nav-item" onclick="switchMobilePage('🤖 AI推荐')">
+            <div class="nav-item" onclick="switchPage('AI推荐')">
                 <span class="nav-icon">🤖</span>
                 <span class="nav-label">AI推荐</span>
             </div>
-            <div class="nav-item" onclick="switchMobilePage('📦 库存管理')">
+            <div class="nav-item" onclick="switchPage('库存管理')">
                 <span class="nav-icon">📦</span>
                 <span class="nav-label">库存</span>
             </div>
-            <div class="nav-item" onclick="switchMobilePage('📈 走势分析')">
+            <div class="nav-item" onclick="switchPage('走势分析')">
                 <span class="nav-icon">📈</span>
                 <span class="nav-label">走势</span>
             </div>
         </div>
 
         <!-- 下拉刷新提示 -->
-        <div class="pull-indicator">⬇️ 下拉刷新行情</div>
+        <div class="pull-indicator">下拉刷新</div>
 
-        <!-- 底部导航 JS 逻辑 -->
+        <!-- 🆕 底部导航 JS：用URL参数切换，100%可靠（不依赖DOM） -->
         <script>
-        function switchMobilePage(pageName) {
-            // 更新顶部标题
-            var titleEl = document.getElementById('mobile-page-title');
-            if (titleEl) {
-                // 🆕 去掉emoji前缀（安全正则，避免Python字符串转义问题）
-                var shortName = pageName.replace(/^[^a-zA-Z\u4e00-\u9fff]+/, '');
-                titleEl.textContent = shortName || pageName;
-            }
-
-            // 🆕 修复：直接用document（不用parent），多策略匹配radio
-            var doc = document;
-
-            // 策略1：data-testid选择器找侧边栏
-            var sidebar = doc.querySelector('[data-testid="stSidebar"]');
-
-            // 策略2：如果找不到，用类名
-            if (!sidebar) {
-                var sections = doc.querySelectorAll('section');
-                for (var i = 0; i < sections.length; i++) {
-                    if (sections[i].getAttribute('data-testid') === 'stSidebar') {
-                        sidebar = sections[i];
-                        break;
-                    }
-                }
-            }
-
-            if (!sidebar) return;
-
-            // 找radiogroup内的所有选项
-            var group = sidebar.querySelector('[role="radiogroup"]');
-            if (!group) return;
-
-            var labels = group.querySelectorAll('label, [role="radio"]');
-            var targetText = pageName.replace(/^[^a-zA-Z\u4e00-\u9fff]+/, '');
-
-            for (var i = 0; i < labels.length; i++) {
-                var text = labels[i].textContent || labels[i].innerText || '';
-                if (text.indexOf(targetText) >= 0) {
-                    labels[i].click();
-                    // 🆕 点击后高亮当前nav项
-                    highlightNav(i);
-                    break;
-                }
-            }
+        function switchPage(name) {
+            var url = new URL(window.location.href);
+            url.searchParams.set('p', name);
+            window.location.href = url.toString();
         }
 
-        // 🆕 高亮当前选中的底部导航项
-        function highlightNav(idx) {
-            var items = document.querySelectorAll('.nav-item');
-            for (var i = 0; i < items.length; i++) {
-                items[i].classList.toggle('active', i === idx);
-            }
-        }
-
-        // 监听页面标题变化，自动更新移动端标题
+        // 🆕 高亮当前页对应的底栏按钮
         (function() {
-            var lastTitle = '';
-            setInterval(function() {
-                var h1 = document.querySelector('h1');
-                var current = h1 ? h1.textContent.trim() : '';
-                if (current && current !== lastTitle) {
-                    lastTitle = current;
-                    var titleEl = document.getElementById('mobile-page-title');
-                    if (titleEl) {
-                        titleEl.textContent = current.replace(/^[^a-zA-Z\u4e00-\u9fff]+/, '');
-                    }
+            var params = new URLSearchParams(window.location.search);
+            var current = params.get('p') || '';
+            var items = document.querySelectorAll('.nav-item');
+            items.forEach(function(item) {
+                var label = item.querySelector('.nav-label');
+                if (label && label.textContent.trim() === current) {
+                    item.classList.add('active');
                 }
-            }, 500);
+            });
         })();
         </script>
         """,

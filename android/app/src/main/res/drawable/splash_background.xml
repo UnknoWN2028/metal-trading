@@ -1,20 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 🆕 启动画面：纯色背景，Android系统级即时显示 -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item>
-        <color android:color="#1A1D26" />
-    </item>
-    <item
-        android:gravity="center"
-        android:width="72dp"
-        android:height="72dp"
-        android:top="-16dp">
-        <shape android:shape="oval">
-            <gradient
-                android:startColor="#F0C060"
-                android:endColor="#C8923A"
-                android:type="radial"
-                android:gradientRadius="36dp" />
-        </shape>
-    </item>
-</layer-list>
+<!-- 启动画面背景色 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:startColor="#1A1D26"
+        android:endColor="#0F1117"
+        android:angle="270" />
+</shape>
