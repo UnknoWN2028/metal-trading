@@ -27,7 +27,6 @@ import android.webkit.WebViewClient;
 import android.widget.EditText;
 import android.widget.ProgressBar;
 import android.widget.Toast;
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 public class MainActivity extends Activity {
 
@@ -36,7 +35,6 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private ProgressBar progressBar;
-    private SwipeRefreshLayout swipeRefresh;
     private String appUrl;
     private boolean pageFinished = false;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -52,27 +50,10 @@ public class MainActivity extends Activity {
 
         webView = findViewById(R.id.webView);
         progressBar = findViewById(R.id.progressBar);
-        swipeRefresh = findViewById(R.id.swipeRefresh);
 
         configureWebView();
 
-        // 🆕 只在WebView滚动到顶部时允许下拉刷新
-        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
-            swipeRefresh.setEnabled(scrollY == 0);
-        });
-
-        // 🆕 初始禁用下拉刷新，等页面加载完+滚动到顶部时自动启用
-        swipeRefresh.setEnabled(false);
-
-        swipeRefresh.setColorSchemeResources(
-                R.color.primary, R.color.accent, R.color.primary_dark);
-        swipeRefresh.setOnRefreshListener(() -> {
-            pageFinished = false;
-            swipeRefresh.setEnabled(false);  // 🆕 刷新期间禁用
-            webView.reload();
-        });
-
-        // 长按弹出修改地址
+        // 🆕 长按弹出修改地址
         webView.setOnLongClickListener(v -> {
             showUrlDialog();
             return true;
@@ -141,7 +122,6 @@ public class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 pageFinished = true;
                 progressBar.setVisibility(View.GONE);
-                swipeRefresh.setRefreshing(false);
                 // 🆕 页面加载完，如果滚动在顶部则启用下拉刷新
                 if (view.getScrollY() == 0) {
                     swipeRefresh.setEnabled(true);
@@ -237,7 +217,6 @@ public class MainActivity extends Activity {
 
     private void showOfflinePage() {
         progressBar.setVisibility(View.GONE);
-        swipeRefresh.setRefreshing(false);
         String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no'></head>"
                 + "<body style='background:linear-gradient(180deg,#1A1D26,#0F1117);display:flex;align-items:center;justify-content:center;"
                 + "height:100vh;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:20px;box-sizing:border-box;margin:0;'>"
