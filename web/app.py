@@ -203,20 +203,8 @@ with st.sidebar:
         ["📊 仪表盘", "💰 实时行情", "📦 库存管理", "🤖 AI推荐",
          "📈 走势分析", "🔔 价格预警", "📋 交易记录", "👥 客户供应商", "📊 利润分析"],
         label_visibility="collapsed",
-        key="nav_page",  # 🆕 显式key防止st.rerun()时丢失状态
+        key="nav_page",
     )
-
-    # 🆕 移动端底栏用URL参数切换页面（比DOM操作可靠）
-    qp_page = st.query_params.get("p")
-    PAGE_OPTIONS = ["仪表盘", "实时行情", "库存管理", "AI推荐", "走势分析", "价格预警", "交易记录", "客户供应商", "利润分析"]
-    if qp_page and qp_page in PAGE_OPTIONS:
-        target = [o for o in ["📊 仪表盘", "💰 实时行情", "📦 库存管理", "🤖 AI推荐",
-                   "📈 走势分析", "🔔 价格预警", "📋 交易记录", "👥 客户供应商", "📊 利润分析"]
-                   if qp_page in o][0]
-        if st.session_state.get("nav_page") != target:
-            st.session_state["nav_page"] = target
-            st.query_params.clear()
-            st.rerun()
 
     st.markdown("---")
 

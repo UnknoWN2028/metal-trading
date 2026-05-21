@@ -839,24 +839,37 @@ def mobile_bottom_nav():
         <!-- 下拉刷新提示 -->
         <div class="pull-indicator">下拉刷新</div>
 
-        <!-- 🆕 底部导航 JS：用URL参数切换，100%可靠（不依赖DOM） -->
+        <!-- 🆕 底部导航 JS：找到Streamlit侧边栏radio并点击 -->
         <script>
+        var PAGE_LABELS = ['仪表盘','行情','AI推荐','库存','走势'];
+        var PAGE_FULL = ['📊 仪表盘','💰 实时行情','🤖 AI推荐','📦 库存管理','📈 走势分析'];
         function switchPage(name) {
-            var url = new URL(window.location.href);
-            url.searchParams.set('p', name);
-            window.location.href = url.toString();
+            // 找侧边栏中所有label元素
+            var allLabels = document.querySelectorAll('label');
+            for (var i = 0; i < allLabels.length; i++) {
+                var txt = allLabels[i].textContent || '';
+                if (txt.indexOf(name) >= 0) {
+                    allLabels[i].click();
+                    return;
+                }
+            }
+            // fallback: 找role=radio
+            var radios = document.querySelectorAll('[role="radio"]');
+            for (var i = 0; i < radios.length; i++) {
+                var txt = radios[i].textContent || '';
+                if (txt.indexOf(name) >= 0) {
+                    radios[i].click();
+                    return;
+                }
+            }
         }
-
-        // 🆕 高亮当前页对应的底栏按钮
         (function() {
-            var params = new URLSearchParams(window.location.search);
-            var current = params.get('p') || '';
             var items = document.querySelectorAll('.nav-item');
             items.forEach(function(item) {
-                var label = item.querySelector('.nav-label');
-                if (label && label.textContent.trim() === current) {
+                item.addEventListener('click', function() {
+                    items.forEach(function(i) { i.classList.remove('active'); });
                     item.classList.add('active');
-                }
+                });
             });
         })();
         </script>
