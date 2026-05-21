@@ -60,7 +60,7 @@ public class MainActivity extends Activity {
                 R.color.primary, R.color.accent, R.color.primary_dark);
         swipeRefresh.setOnRefreshListener(() -> {
             pageFinished = false;
-            webView.clearCache(true);
+            // 🆕 下拉刷新不清除缓存，只重新加载页面（利用已缓存资源）
             webView.reload();
         });
 
@@ -79,32 +79,36 @@ public class MainActivity extends Activity {
 
     @SuppressLint("SetJavaScriptEnabled")
     private void configureWebView() {
-        // 开启 WebView 远程调试（Chrome inspect）
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            WebView.setWebContentsDebuggingEnabled(true);
-        }
-
         WebSettings settings = webView.getSettings();
 
+        // ── 基础设置 ──
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        // ── 🆕 性能优化 ──
+        settings.setRenderPriority(WebSettings.RenderPriority.HIGH);
+        settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);  // 优先缓存
+        settings.setLoadsImagesAutomatically(true);
+        settings.setBlockNetworkImage(false);
+        // 🆕 启用硬件加速层
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+
+        // ── 视口 ──
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setTextZoom(100);
-        // 关键：允许跨域访问（Streamlit 内部 iframe 需要）
         settings.setSupportMultipleWindows(false);
         settings.setBlockNetworkLoads(false);
-        settings.setBlockNetworkImage(false);
-        // 自定义 User-Agent，避免 Streamlit Cloud 拒绝 WebView
+
+        // ── User-Agent: 伪装Chrome避免Streamlit Cloud拒绝 ──
         String userAgent = settings.getUserAgentString()
-                .replace("; wv", "")  // 移除 WebView 标记
-                .replace("Version/", "Chrome/");  // 伪装成 Chrome
+                .replace("; wv", "")
+                .replace("Version/", "Chrome/");
         settings.setUserAgentString(userAgent);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -113,7 +117,6 @@ public class MainActivity extends Activity {
 
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-        // 暴露接口给网页调用
         webView.addJavascriptInterface(new AndroidBridge(), "Android");
 
         webView.setWebViewClient(new WebViewClient() {
@@ -136,20 +139,18 @@ public class MainActivity extends Activity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request,
                                         WebResourceError error) {
-                // 只对主框架错误做处理，忽略子资源错误
                 if (request.isForMainFrame() && !pageFinished) {
-                    // 延迟判断：如果 20 秒内还没加载成功才显示离线页
+                    // 🆕 缩短超时：8s（原20s）
                     handler.postDelayed(() -> {
                         if (!pageFinished) {
                             showOfflinePage();
                         }
-                    }, 20000);
+                    }, 8000);
                 }
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                // 所有 URL 在 WebView 内打开
                 return false;
             }
         });
@@ -159,8 +160,24 @@ public class MainActivity extends Activity {
             public void onProgressChanged(WebView view, int newProgress) {
                 super.onProgressChanged(view, newProgress);
                 progressBar.setProgress(newProgress);
+                // 🆕 加载完成时触发一次 theme适配（注入暗色/亮色检测JS）
+                if (newProgress == 100) {
+                    injectThemeBridge();
+                }
             }
         });
+    }
+
+    /**
+     * 🆕 注入JS桥接：让Web页面感知Android环境，优化交互体验
+     */
+    private void injectThemeBridge() {
+        String js = "javascript:(function(){"
+                + "window.__isAndroidApp__=true;"
+                + "window.__androidVersion__='1.0';"
+                + "document.body.classList.add('android-app');"
+                + "})()";
+        webView.evaluateJavascript(js, null);
     }
 
     /**
@@ -209,16 +226,19 @@ public class MainActivity extends Activity {
     private void showOfflinePage() {
         progressBar.setVisibility(View.GONE);
         swipeRefresh.setRefreshing(false);
-        String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
-                + "<body style='background:#F5F6FA;display:flex;align-items:center;justify-content:center;"
-                + "height:100vh;flex-direction:column;font-family:sans-serif;text-align:center;padding:20px;box-sizing:border-box;'>"
-                + "<div style='font-size:3rem;margin-bottom:16px;'>&#x1F529;</div>"
-                + "<h2 style='color:#1A1D26;margin:0;'>有色金属AI交易</h2>"
-                + "<p style='color:#6B7280;margin:12px 0;'>无法连接到服务器</p>"
-                + "<p style='color:#9CA3AF;font-size:0.85rem;'>下拉刷新重试 · 长按修改地址</p>"
-                + "<button onclick='location.reload()' style='margin-top:16px;padding:14px 32px;"
-                + "background:#C8923A;color:white;border:none;border-radius:10px;font-size:1rem;'>🔄 重试连接</button>"
-                + "<p style='color:#9CA3AF;font-size:0.72rem;margin-top:12px;word-break:break-all;'>"
+        String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no'></head>"
+                + "<body style='background:linear-gradient(180deg,#1A1D26,#0F1117);display:flex;align-items:center;justify-content:center;"
+                + "height:100vh;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:20px;box-sizing:border-box;margin:0;'>"
+                + "<div style='width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#D4A460,#C8923A);"
+                + "display:flex;align-items:center;justify-content:center;margin-bottom:24px;box-shadow:0 4px 20px rgba(200,146,58,0.3);'>"
+                + "<span style='font-size:28px;'>&#9889;</span></div>"
+                + "<h2 style='color:#E4E7EB;margin:0 0 8px 0;font-size:20px;font-weight:700;'>有色金属AI交易</h2>"
+                + "<p style='color:#9CA3AF;margin:0 0 24px 0;font-size:14px;'>无法连接到服务器</p>"
+                + "<button onclick='location.reload()' style='padding:14px 48px;"
+                + "background:linear-gradient(135deg,#C8923A,#D4832A);color:white;border:none;border-radius:12px;font-size:15px;"
+                + "font-weight:600;box-shadow:0 2px 8px rgba(200,146,58,0.4);cursor:pointer;'>重新连接</button>"
+                + "<p style='color:#6B7280;font-size:12px;margin-top:20px;'>下拉刷新 · 长按修改地址</p>"
+                + "<p style='color:#4B5563;font-size:11px;margin-top:8px;word-break:break-all;max-width:280px;'>"
                 + appUrl + "</p></body></html>";
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
     }

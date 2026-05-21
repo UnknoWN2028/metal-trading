@@ -10,13 +10,17 @@
         <item name="android:statusBarColor">#C8923A</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 
-    <!-- 启动画面主题 -->
+    <!-- 启动画面主题（预显示品牌logo，避免白屏） -->
     <style name="Theme.MetalTrading.Splash" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="colorPrimary">#C8923A</item>
         <item name="android:statusBarColor">#C8923A</item>
         <item name="android:navigationBarColor">#FFFFFF</item>
-        <item name="android:windowBackground">#F5F6FA</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <!-- 🆕 启动画面背景：金色渐变，隐藏白屏 -->
+        <item name="android:windowBackground">@drawable/splash_background</item>
     </style>
 </resources>
