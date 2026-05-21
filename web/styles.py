@@ -876,7 +876,7 @@ def mobile_bottom_nav():
 
 
 def factor_scores_card(ta: dict):
-    """多因子评分卡片（移动端自适应紧凑版）"""
+    """多因子评分卡片（移动端自适应紧凑版）— v3.2 含背离因子"""
     rows = [
         ("📊", "技术面", [
             ("趋势", ta.get('trend_score', '-')),
@@ -885,11 +885,14 @@ def factor_scores_card(ta: dict):
             ("支撑", ta.get('sr_score', '-')),
             ("量价", ta.get('volume_score', '-')),
             ("状态", ta.get('regime_score', '-')),
+            ("背离", ta.get('divergence_score', '-')),
         ]),
         ("🌍", "基本面", [
             ("季节性", ta.get('seasonal_score', '-')),
             ("联动性", ta.get('correlation_score', '-')),
             ("宏观", ta.get('macro_score', '-')),
+            ("多周期", ta.get('timeframe_score', '-')),
+            ("供需", ta.get('supply_demand_score', '-')),
         ]),
         ("🏭", "运营面", [
             ("运营", ta.get('operational_score', '-')),
@@ -932,14 +935,33 @@ def factor_scores_card(ta: dict):
 
 
 def recommendation_card(rec: dict, index: int, action_type: str):
-    """推荐卡片（移动端自适应）"""
+    """推荐卡片（移动端自适应）— v3.2 支持精确操作类型"""
     ta = rec.get('trend_analysis', {})
     confidence = rec.get('confidence', 0)
     is_buy = action_type == "buy"
+    actual_action = rec.get('action', '买入' if is_buy else '卖出')
 
-    accent = "#10B981" if is_buy else "#EF4444"
-    accent_bg = "#ECFDF5" if is_buy else "#FEF2F2"
-    emoji = "🟢" if is_buy else "🔴"
+    # 根据实际操作类型选择颜色/图标
+    if actual_action in ("买入", "加仓"):
+        accent = "#10B981"
+        accent_bg = "#ECFDF5"
+        emoji = "🟢" if actual_action == "买入" else "📈"
+    elif actual_action in ("卖出", "减仓"):
+        accent = "#EF4444"
+        accent_bg = "#FEF2F2"
+        emoji = "🔴" if actual_action == "卖出" else "📉"
+    elif actual_action == "止损":
+        accent = "#DC2626"
+        accent_bg = "#FEE2E2"
+        emoji = "🚨"
+    elif actual_action == "观望":
+        accent = "#F59E0B"
+        accent_bg = "#FFFBEB"
+        emoji = "⏸️"
+    else:
+        accent = "#10B981" if is_buy else "#EF4444"
+        accent_bg = "#ECFDF5" if is_buy else "#FEF2F2"
+        emoji = "🟢" if is_buy else "🔴"
 
     price = rec.get('current_price', 0)
     sl = rec.get('stop_loss', 0)
@@ -947,7 +969,9 @@ def recommendation_card(rec: dict, index: int, action_type: str):
     qty = rec.get('suggested_quantity_kg', 0)
     profit = rec.get('expected_profit_pct', 0)
 
-    profit_line = f'<span>💰 预期利润: <b style="color:{accent};">{profit:+.1f}%</b></span>' if not is_buy else ''
+    profit_line = f'<span>💰 预期利润: <b style="color:{accent};">{profit:+.1f}%</b></span>' if profit != 0 else ''
+    factor_agree = ta.get('factor_agreement', None)
+    agree_line = f'<span>📊 因子一致: <b>{factor_agree:.0%}</b></span>' if factor_agree is not None else ''
 
     html = f"""
     <div class="rec-card" style="
@@ -968,7 +992,7 @@ def recommendation_card(rec: dict, index: int, action_type: str):
                 </span>
                 <span style="background:{accent_bg};color:{accent};padding:2px 8px;
                              border-radius:10px;font-size:0.72rem;font-weight:600;white-space:nowrap;">
-                    {emoji} {'买入' if is_buy else '卖出'}
+                    {emoji} {actual_action}
                 </span>
             </div>
             <span style="font-size:1.1rem;font-weight:700;color:#1A1D26;">
@@ -980,6 +1004,7 @@ def recommendation_card(rec: dict, index: int, action_type: str):
             <span>🏁 止盈: <b style="color:#10B981;">¥{tp:,.0f}</b></span>
             <span>📦 建议量: <b style="color:#C8923A;">{qty:,.0f}kg</b></span>
             {profit_line}
+            {agree_line}
         </div>
     </div>"""
     st.markdown(html, unsafe_allow_html=True)

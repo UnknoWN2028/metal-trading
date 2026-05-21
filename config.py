@@ -57,23 +57,24 @@ RECOMMENDATION = {
     "capital_cost_annual": 0.05, # 资金年化成本5%
 }
 
-# ── 多因子评分权重 v3（技术面 + 基本面 + 运营面） ──
+# ── 多因子评分权重 v3.2（技术面 + 基本面 + 运营面 + 背离检测） ──
 FACTOR_WEIGHTS = {
-    # 技术面权重（合计 51%）
-    "trend":       0.15,   # 多周期趋势
-    "momentum":    0.12,   # RSI + MACD + 随机
-    "volatility":  0.07,   # ATR + 布林带
-    "sr_levels":   0.07,   # 支撑阻力
+    # 技术面权重（合计 46% → 趋势检测 + 反转信号）
+    "trend":       0.13,   # 多周期趋势
+    "momentum":    0.10,   # RSI + MACD + 随机
+    "volatility":  0.06,   # ATR + 布林带
+    "sr_levels":   0.06,   # 支撑阻力
     "volume":      0.05,   # 量价配合
     "regime":      0.05,   # 市场状态
-    # 基本面权重（合计 34%）
-    "seasonal":    0.07,   # 🆕 季节性规律
-    "correlation": 0.06,   # 🆕 跨品种联动/对冲
-    "macro_bias":  0.08,   # 🆕 宏观环境偏差（LLM驱动）
-    "timeframe":   0.08,   # 🆕 多周期趋势一致性
+    "divergence":  0.12,   # 🆕 v3.2 RSI+MACD背离检测（最强反转信号）
+    # 基本面权重（合计 31%）
+    "seasonal":    0.06,   # 🆕 季节性规律
+    "correlation": 0.05,   # 🆕 跨品种联动/对冲
+    "macro_bias":  0.07,   # 🆕 宏观环境偏差（LLM驱动）
+    "timeframe":   0.07,   # 🆕 多周期趋势一致性
     "supply_demand": 0.05, # 🆕 供需基本面代理
-    # 运营面权重（合计 15%）
-    "operational": 0.10,   # 🆕 运营效率（周转率/资金成本/仓储）
+    # 运营面权重（合计 13%）
+    "operational": 0.08,   # 🆕 运营效率（周转率/资金成本/仓储）
     "risk_mgmt":   0.05,   # 🆕 风险管理（集中度/回撤/流动性）
 }
 

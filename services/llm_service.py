@@ -16,15 +16,16 @@ SYSTEM_PROMPT = """你是一位资深有色金属回收贸易分析师，拥有2
 
 1. 分析当前市场态势（多头/空头/震荡），考虑宏观环境
 2. 结合技术指标 + 季节性规律 + 跨品种联动判断买卖时机
-3. 考虑库存成本、资金占用、仓储费用等运营因素
-4. 评估组合集中度风险，给出仓位管理建议
-5. 关注供需基本面（新能源需求、房地产、基建等产业链影响）
-6. 明确指出政策风险、地缘风险和其他不确定性
-7. 给出具体的操作建议（买入/卖出/持有）及置信度理由
+3. 🆕 特别关注背离信号（RSI顶/底背离、MACD背离）——这是最强的反转预警
+4. 考虑库存成本、资金占用、仓储费用等运营因素
+5. 评估组合集中度风险，给出仓位管理建议
+6. 关注供需基本面（新能源需求、房地产、基建等产业链影响）
+7. 明确指出政策风险、地缘风险和其他不确定性
+8. 给出具体的操作建议（买入/卖出/持有/加仓/减仓）及置信度理由
 
 回复格式要求：
 - 用中文回复，简洁专业
-- 第一行给出明确结论（买入/卖出/持有）
+- 第一行给出明确结论（买入/卖出/持有/加仓/减仓）
 - 分【市场环境】【技术面】【基本面】【风险提示】四大块说明
 - 每个板块2-3句话即可
 - 最后给出操作建议置信度（高/中/低）"""
@@ -150,6 +151,7 @@ class LLMService:
             lines.append(f"\n### 🎯 量化因子评分 (综合: {composite:.0f}/100)")
             lines.append(f"趋势:{quant.get('trend_score', 0):.0f} "
                         f"动量:{quant.get('momentum_score', 0):.0f} "
+                        f"背离:{_qf(quant, 'divergence_score'):.0f} "
                         f"波动:{quant.get('volatility_score', 0):.0f} "
                         f"支撑:{quant.get('sr_score', 0):.0f}")
             lines.append(f"量价:{_qf(quant, 'volume_score'):.0f} "
@@ -183,8 +185,14 @@ class LLMService:
         recommendation = ""
         if "买入" in first_line[:15] or "做多" in first_line[:10]:
             recommendation = "买入"
+        elif "加仓" in first_line[:15]:
+            recommendation = "加仓"
         elif "卖出" in first_line[:15] or "做空" in first_line[:10]:
             recommendation = "卖出"
+        elif "减仓" in first_line[:15]:
+            recommendation = "减仓"
+        elif "止损" in first_line[:15]:
+            recommendation = "止损"
         elif "持有" in first_line[:15] or "观望" in first_line[:10] or "等待" in first_line[:10]:
             recommendation = "持有"
 

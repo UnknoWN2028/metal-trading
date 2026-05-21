@@ -616,7 +616,9 @@ elif page == "🤖 AI推荐":
         if all_r:
             df_r = pd.DataFrame(all_r)
             df_r['操作'] = df_r['action'].map({
-                '买入': '🟢买入', '卖出': '🔴卖出', '持有': '⏸️持有'
+                '买入': '🟢买入', '加仓': '📈加仓',
+                '卖出': '🔴卖出', '减仓': '📉减仓', '止损': '🚨止损',
+                '持有': '⏸️持有', '观望': '👀观望',
             })
             st.dataframe(
                 df_r[['metal_type', '操作', 'confidence', 'current_price',

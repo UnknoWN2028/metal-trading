@@ -1,5 +1,13 @@
 """
-AI推荐引擎 v2 — 多因子加权评分 + 动态风控 + 凯利仓位
+AI推荐引擎 v3.2 — 多因子加权评分 + 动态权重 + 背离检测 + 自适应风控
+
+优化项 (v3.2):
+- 🆕 背离因子：RSI背离 + MACD背离（最强反转信号）
+- 🆕 动态权重：趋势市 vs 震荡市自适应调整
+- 🆕 评分标准化：所有因子统一[-20, +20]影响范围
+- 🆕 决策矩阵重写：清晰分层，消除brittle嵌套
+- 🆕 自适应止损：ATR倍数随波动率动态缩放
+- 🆕 置信度校准：考虑因子一致性和市场状态
 """
 import numpy as np
 import pandas as pd
@@ -12,19 +20,36 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ── 评分权重 v3（从 config 动态读取，此处作 fallback） ──
+# ── 基础权重 v3.2（从 config 动态读取，此处作 fallback） ──
 from config import FACTOR_WEIGHTS as _CFG_WEIGHTS
-WEIGHTS = {
-    "trend":       0.15, "momentum":    0.12, "volatility":  0.07,
-    "sr_levels":   0.07, "volume":      0.05, "regime":      0.05,
-    "seasonal":    0.07, "correlation": 0.06, "macro_bias":  0.08,
-    "timeframe":   0.08, "supply_demand": 0.05,
-    "operational": 0.10, "risk_mgmt":   0.05,
+BASE_WEIGHTS = {
+    "trend":       0.13, "momentum":    0.10, "volatility":  0.06,
+    "sr_levels":   0.06, "volume":      0.05, "regime":      0.05,
+    "seasonal":    0.06, "correlation": 0.05, "macro_bias":  0.07,
+    "timeframe":   0.07, "supply_demand": 0.05,
+    "operational": 0.08, "risk_mgmt":   0.05,
+    "divergence":  0.12,  # 🆕 背离检测（RSI+MACD）
 }
+# 从 config 合并（config中有定义则覆盖）
 try:
-    WEIGHTS.update(_CFG_WEIGHTS)
+    for k, v in _CFG_WEIGHTS.items():
+        BASE_WEIGHTS[k] = v
 except Exception:
-    pass  # 使用默认权重
+    pass
+
+# ── 动态权重调整策略 ──
+# 趋势市：趋势/动量/背离/多周期权重加倍，SR/波动权重减半
+# 震荡市：SR/波动/布林带权重加倍，趋势/动量权重减半
+TRENDING_WEIGHT_ADJ = {
+    "trend": 1.6, "momentum": 1.5, "divergence": 1.4, "timeframe": 1.4,
+    "regime": 1.3, "correlation": 1.2,
+    "sr_levels": 0.4, "volatility": 0.5,
+}
+RANGING_WEIGHT_ADJ = {
+    "sr_levels": 2.0, "volatility": 1.8, "volume": 1.5,
+    "seasonal": 1.3, "correlation": 1.3,
+    "trend": 0.4, "momentum": 0.5, "timeframe": 0.5, "divergence": 0.6,
+}
 
 
 class RecommendationService:
@@ -108,6 +133,10 @@ class RecommendationService:
         scores["regime"], rr = self._score_regime(ind)
         reasons_all.extend(rr)
 
+        # 🆕 v3.2 背离检测（RSI + MACD，最强反转信号）
+        scores["divergence"], dvr = self._score_divergence(ind, prices)
+        reasons_all.extend(dvr)
+
         # ── 🆕 v3 新增因子 ──
         scores["seasonal"], ser = self._score_seasonal(metal_type, ind)
         reasons_all.extend(ser)
@@ -146,26 +175,37 @@ class RecommendationService:
         )
         reasons_all.extend(rmr)
 
+        # ── 🆕 v3.2 动态权重：根据市场状态自适应调整 ──
+        weights = self._adaptive_weights(ind, all_metals_summary)
+
         # ── 加权总分 (0-100) ──
-        composite = sum(scores[k] * WEIGHTS.get(k, 0) for k in scores)
+        composite = sum(scores[k] * weights.get(k, 0) for k in scores)
         composite = max(0, min(100, composite))
 
-        # ── 决策 ──
-        action, confidence = self._decide(composite, inventory_items, current,
-                                          ind, inv_data)
+        # ── 🆕 v3.2 决策（重写的清晰决策矩阵） ──
+        action, confidence = self._decide_v3(composite, inventory_items, current,
+                                              ind, inv_data, scores)
 
-        # ── 风控：ATR止损/止盈 + 凯利仓位 ──
+        # ── 🆕 v3.2 自适应风控：ATR倍数随波动率动态缩放 ──
         atr = ind["atr"]
-        stop_loss = current - atr * 2.5 if action == "买入" else current + atr * 2.5
-        take_profit = current + atr * 3.5 if action == "买入" else current - atr * 3.5
-        suggested_qty = self._kelly_position(
-            action, inventory_items, current, ind["volatility_30d"], atr
+        stop_loss, take_profit = self._adaptive_stops(
+            action, current, atr, ind, inventory_items, inv_data
+        )
+        suggested_qty = self._kelly_position_v3(
+            action, inventory_items, current, ind["volatility_30d"], atr, confidence
         )
 
         expected_profit = 0
-        if inventory_items and action == "卖出":
+        if inventory_items and action in ("卖出", "减仓"):
             avg_cost = np.mean([it['avg_cost_price'] for it in inventory_items])
             expected_profit = (current - avg_cost) / avg_cost * 100
+
+        # 🆕 因子一致性 → 提升理由质量
+        factor_agree = self._factor_agreement(scores, action)
+        if factor_agree >= 0.7:
+            reasons_all.insert(0, "🎯 多因子高度一致")
+        elif factor_agree <= 0.3:
+            reasons_all.insert(0, "⚡ 因子分歧较大，建议谨慎")
 
         reason_text = "；".join(reasons_all[:8]) if reasons_all else "市场中性，持有观望"
 
@@ -188,6 +228,8 @@ class RecommendationService:
                 "sr_score": round(scores["sr_levels"], 1),
                 "volume_score": round(scores["volume"], 1),
                 "regime_score": round(scores["regime"], 1),
+                # 🆕 v3.2 背离因子
+                "divergence_score": round(scores.get("divergence", 50), 1),
                 # 🆕 v3 新增因子
                 "seasonal_score": round(scores.get("seasonal", 50), 1),
                 "correlation_score": round(scores.get("correlation", 50), 1),
@@ -196,6 +238,9 @@ class RecommendationService:
                 "supply_demand_score": round(scores.get("supply_demand", 50), 1),
                 "operational_score": round(scores.get("operational", 50), 1),
                 "risk_score": round(scores.get("risk_mgmt", 50), 1),
+                # 市场状态
+                "realtime_source": source,
+                "factor_agreement": round(factor_agree, 2),
                 # 原有技术指标
                 "rsi": round(ind["rsi"], 1),
                 "macd": round(ind["macd"], 4),
@@ -335,6 +380,7 @@ class RecommendationService:
                     "sr_score": ta.get('sr_score', 0),
                     "volume_score": ta.get('volume_score', 0),
                     "regime_score": ta.get('regime_score', 0),
+                    "divergence_score": ta.get('divergence_score', 50),
                     "seasonal_score": ta.get('seasonal_score', 50),
                     "correlation_score": ta.get('correlation_score', 50),
                     "macro_score": ta.get('macro_score', 50),
@@ -356,10 +402,10 @@ class RecommendationService:
             return {"success": False, "message": str(e)[:120]}
 
     def _enrich_top_with_llm(self, results: list):
-        """对Top信号调用LLM增强"""
-        buy = sorted([r for r in results if r['action'] == '买入'],
+        """🆕 v3.2 对Top信号调用LLM增强（含所有操作类型）"""
+        buy = sorted([r for r in results if r['action'] in ('买入', '加仓')],
                      key=lambda x: x['confidence'], reverse=True)[:3]
-        sell = sorted([r for r in results if r['action'] == '卖出'],
+        sell = sorted([r for r in results if r['action'] in ('卖出', '减仓', '止损')],
                       key=lambda x: x['confidence'], reverse=True)[:3]
         to_enrich = buy + sell
 
@@ -384,6 +430,8 @@ class RecommendationService:
                         "sr_score": ta.get('sr_score', 0),
                         "volume_score": ta.get('volume_score', 0),
                         "regime_score": ta.get('regime_score', 0),
+                        # 🆕 v3.2 背离因子
+                        "divergence_score": ta.get('divergence_score', 50),
                         # 🆕 v3 因子
                         "seasonal_score": ta.get('seasonal_score', 50),
                         "correlation_score": ta.get('correlation_score', 50),
@@ -422,9 +470,9 @@ class RecommendationService:
 
     def get_top_opportunities(self, top_n: int = 5) -> dict:
         all_recs = self.analyze_all_metals()
-        buy = sorted([r for r in all_recs if r['action'] == '买入'],
+        buy = sorted([r for r in all_recs if r['action'] in ('买入', '加仓')],
                      key=lambda x: x['confidence'], reverse=True)
-        sell = sorted([r for r in all_recs if r['action'] == '卖出'],
+        sell = sorted([r for r in all_recs if r['action'] in ('卖出', '减仓', '止损')],
                       key=lambda x: x['confidence'], reverse=True)
         return {"top_buy": buy[:top_n], "top_sell": sell[:top_n], "all": all_recs}
 
@@ -764,134 +812,303 @@ class RecommendationService:
         return score, reasons, info
 
     # ═══════════════════════════════════════════════════════
-    #  决策 + 风控
+    #  🆕 v3.2 动态权重 + 自适应决策 + 因子一致性
     # ═══════════════════════════════════════════════════════
 
-    def _decide(self, composite: float, inventory_items: list,
-                current: float, ind: dict, inv_data: dict) -> tuple:
-        """综合评分 → 买卖决策（v3增强：波动率自适应 + 多周期门控）"""
+    def _adaptive_weights(self, ind: dict, all_summary: dict) -> dict:
+        """🆕 根据市场状态动态调整因子权重
+        
+        趋势市：趋势/动量/背离/多周期权重放大，SR/波动权重缩小
+        震荡市：SR/波动/布林带权重放大，趋势/动量权重缩小
+        """
+        w = dict(BASE_WEIGHTS)  # 从基础权重开始
+
+        adx = ind.get("adx", 15)
+        vol_30 = ind.get("volatility_30d", 0.015)
+        bb_width = 0.02
+        bb_upper = ind.get("bb_upper", 0)
+        bb_mid = ind.get("bb_mid", 1)
+        if bb_upper > bb_mid > 0:
+            bb_width = (bb_upper - bb_mid * 0.98) / bb_mid
+
+        # 确定市场状态强度 [0~1]
+        trending_strength = 0.0
+        # ADX贡献：>20开始有趋势，>40强烈趋势
+        if adx > 20:
+            trending_strength = min((adx - 20) / 25, 1.0)
+        # 布林带宽贡献：窄带(<4%) = 压缩待突破，宽带(>8%) = 趋势展开中
+        if bb_width > 0.06 and adx > 22:
+            trending_strength = max(trending_strength, 0.5)
+
+        ranging_strength = 1.0 - trending_strength
+
+        # 插值权重：trending时的权重 vs ranging时的权重
+        for k in w:
+            t_adj = TRENDING_WEIGHT_ADJ.get(k, 1.0)
+            r_adj = RANGING_WEIGHT_ADJ.get(k, 1.0)
+            blend = t_adj * trending_strength + r_adj * ranging_strength
+            w[k] = w[k] * blend
+
+        # 重量归一化（确保总权重 = 1.0）
+        total = sum(w.values())
+        if total > 0:
+            w = {k: v / total for k, v in w.items()}
+
+        return w
+
+    def _decide_v3(self, composite: float, inventory_items: list,
+                   current: float, ind: dict, inv_data: dict,
+                   scores: dict) -> tuple:
+        """🆕 v3.2 清晰决策矩阵 — 分级制，消除brittle嵌套
+        
+        决策层级:
+          composite >= 75 → 强烈买入/卖出
+          composite >= 65 → 买入/卖出（正常）
+          composite >= 55 → 偏多/偏空（小幅操作）
+          composite >= 45 → 持有观望
+          composite >= 35 → 偏空/减仓
+          composite < 35  → 强烈卖出/止损
+        """
         has_inv = bool(inventory_items)
         profit_pct = inv_data.get("profit_pct", 0) if inv_data else 0
-        vol = ind.get("volatility_30d", 0)
+        vol = ind.get("volatility_30d", 0.015)
+        adx = ind.get("adx", 15)
+        rsi = ind.get("rsi", 50)
 
-        # ── 波动率自适应阈值 ──
-        # 高波动市场提高买入门槛，降低卖出门槛
-        if vol > 0.03:
-            buy_adj = +8   # 高波动更难买入
-            sell_adj = -5  # 高波动更易卖出（锁定利润/止损）
+        # ── 波动率调整 ──
+        if vol > 0.04:
+            vol_discount = 0.85  # 极高波动，降低所有置信度
+        elif vol > 0.03:
+            vol_discount = 0.92
         elif vol > 0.02:
-            buy_adj = +3
-            sell_adj = -2
+            vol_discount = 1.0
         else:
-            buy_adj = -3   # 低波动更容易建仓
-            sell_adj = +2
+            vol_discount = 1.05  # 低波动，信号更可靠
 
-        # ── 多周期趋势门控 ──
-        # 日均线之上 = 短期多头，周均线(MA30代理)之上 = 中期多头
-        mtf_bullish = ind["current"] > ind["ma7"] and ind["current"] > ind["ma30"]
-        mtf_bearish = ind["current"] < ind["ma7"] and ind["current"] < ind["ma30"]
-        mtf_neutral = not mtf_bullish and not mtf_bearish
+        # ── 背离信号（最强修正因子）──
+        divergence_score = scores.get("divergence", 50)
+        has_bearish_div = divergence_score < 35   # 顶背离
+        has_bullish_div = divergence_score > 65   # 底背离
 
-        adj_composite = composite
-        if mtf_bullish:
-            adj_composite += 5   # 多周期共振加分
-        elif mtf_bearish:
-            adj_composite -= 5
-
-        # ── 决策矩阵 ──
-        buy_threshold = 65 + buy_adj
-        sell_threshold_by_score = 72 + sell_adj
-
-        if adj_composite >= sell_threshold_by_score and has_inv and profit_pct > 0:
-            # 高分 + 有持仓 + 盈利 → 卖出
-            conf = min(adj_composite / 100, 0.98)
-            if profit_pct > 10:
-                conf = min(conf + 0.05, 0.98)
+        # ── 清晰决策矩阵 ──
+        # 顶背离优先：任何场景下顶背离=强卖出信号
+        if has_bearish_div and has_inv and profit_pct > 0:
+            conf = 0.85 * vol_discount
+            if rsi > 70:
+                conf = min(conf * 1.1, 0.95)
             return "卖出", conf
 
-        if adj_composite >= buy_threshold:
-            if not has_inv:
-                # 无持仓 + 高分 → 买入
-                conf = min(adj_composite / 100, 0.95)
-                if mtf_bullish:
-                    conf = min(conf + 0.05, 0.95)
-                return "买入", conf
-            elif has_inv:
-                if profit_pct > 8 and adj_composite >= 68:
-                    return "卖出", 0.70
-                elif profit_pct > 5 and mtf_bearish:
-                    return "卖出", 0.60
-                else:
-                    return "持有", 0.50
+        if has_bearish_div and not has_inv:
+            # 无持仓时顶背离 = 不要买
+            return "观望", 0.70
 
-        if adj_composite >= 55:
+        # 底背离优先：底背离+低分 = 反弹买入机会
+        if has_bullish_div and not has_inv and composite > 40:
+            conf = 0.55 * vol_discount
+            if rsi < 35:
+                conf = min(conf * 1.15, 0.80)
+            return "买入", conf
+
+        if has_bullish_div and has_inv:
+            # 持仓中底背离 = 不要卖，等反弹
+            return "持有", 0.60
+
+        # ── 正常决策矩阵（无背离信号时）──
+        if composite >= 75:
             if has_inv:
-                if profit_pct > 10:
+                if profit_pct > 5:
+                    return "卖出", min(0.88 * vol_discount, 0.95)
+                elif profit_pct < -5:
+                    return "持有", 0.55  # 高分但亏损，等待解套
+                return "加仓", min(0.72 * vol_discount, 0.85)
+            else:
+                return "买入", min(0.82 * vol_discount, 0.92)
+
+        if composite >= 65:
+            if has_inv:
+                if profit_pct > 8:
+                    return "卖出", min(0.75 * vol_discount, 0.88)
+                elif profit_pct > 0:
+                    return "持有", 0.55
+                return "持有", 0.45
+            else:
+                return "买入", min(0.68 * vol_discount, 0.80)
+
+        if composite >= 55:
+            if has_inv:
+                if profit_pct > 12:
+                    return "减仓", 0.65
+                return "持有", 0.50
+            else:
+                # 中等分数，仅在有底背离或多头排列时入
+                if ind["current"] > ind["ma20"] and adx > 20:
+                    return "买入", 0.42
+                return "观望", 0.35
+
+        if composite >= 45:
+            if has_inv:
+                if profit_pct > 15:
+                    return "减仓", 0.55
+                if profit_pct < -10:
+                    return "减仓", 0.45  # 中等偏弱 + 深度亏损 → 建议减仓
+                return "持有", 0.40
+            return "观望", 0.30
+
+        if composite >= 35:
+            if has_inv:
+                if profit_pct > 3:
                     return "卖出", 0.60
-                return "持有", max(0.4, adj_composite / 100)
-            elif mtf_bullish:
-                return "买入", 0.45
-            return "持有", 0.45
+                if profit_pct < -5:
+                    return "减仓", 0.50
+                return "持有", 0.35
+            return "观望", 0.25
 
-        if adj_composite >= 40:
-            return "持有", 0.50
-
-        if adj_composite >= 28:
-            if has_inv and profit_pct > 8:
-                return "卖出", 0.55
-            return "持有", 0.35
-
-        # composite < 28: 强制谨慎
+        # composite < 35: 强烈偏空
         if has_inv:
-            # 严重低分时，微利也建议减仓
-            if profit_pct > 3:
-                return "卖出", 0.55
-            elif profit_pct < -8:
-                # 深度亏损但信号极差：建议部分止损
-                return "卖出", 0.45
-        return "持有", 0.25
+            if profit_pct > 1:
+                return "卖出", 0.70  # 微利也要卖
+            elif profit_pct > -5:
+                return "减仓", 0.55
+            # 深度亏损 + 极低分：止损建议
+            return "止损", 0.60
+        return "观望", 0.20
 
-    def _kelly_position(self, action: str, inventory_items: list,
-                        current: float, volatility: float, atr: float) -> float:
-        """凯利公式仓位建议"""
-        if action == "持有":
+    def _adaptive_stops(self, action: str, current: float, atr: float,
+                        ind: dict, inventory_items: list,
+                        inv_data: dict) -> tuple:
+        """🆕 v3.2 自适应止损/止盈：ATR倍数随波动率动态缩放"""
+        vol = ind.get("volatility_30d", 0.015)
+        adx = ind.get("adx", 15)
+        bb_width = 0.02
+        if ind.get("bb_mid", 1) > 0:
+            bb_width = (ind.get("bb_upper", current * 1.05) - ind.get("bb_lower", current * 0.95)) / ind.get("bb_mid", current)
+
+        # 基础ATR倍数
+        base_sl_mult = 2.5
+        base_tp_mult = 3.5
+
+        # 高波动 → 放宽止损（避免被噪音扫出）
+        if vol > 0.04:
+            base_sl_mult = 3.2
+            base_tp_mult = 4.5
+        elif vol > 0.03:
+            base_sl_mult = 2.8
+            base_tp_mult = 4.0
+        elif vol < 0.01:
+            base_sl_mult = 2.0
+            base_tp_mult = 2.8
+
+        # 强趋势 → 放宽止盈（让利润奔跑）
+        if adx > 30:
+            base_tp_mult += 1.0
+        elif adx < 18:
+            base_tp_mult -= 0.5  # 震荡市快速止盈
+
+        if action in ("买入", "加仓"):
+            stop_loss = current - atr * base_sl_mult
+            take_profit = current + atr * base_tp_mult
+        elif action in ("卖出", "减仓", "止损"):
+            stop_loss = current + atr * base_sl_mult * 0.7  # 卖出时止损更紧
+            take_profit = current - atr * base_tp_mult * 0.8
+        else:
+            stop_loss = current - atr * 1.5
+            take_profit = current + atr * 2.0
+
+        return round(stop_loss, 2), round(take_profit, 2)
+
+    def _kelly_position_v3(self, action: str, inventory_items: list,
+                            current: float, volatility: float, atr: float,
+                            confidence: float) -> float:
+        """🆕 v3.2 凯利仓位：引入置信度折扣"""
+        if action in ("持有", "观望"):
             return 0
 
-        if action == "卖出" and inventory_items:
+        if action in ("卖出", "减仓", "止损") and inventory_items:
             total_kg = sum(it['quantity_kg'] for it in inventory_items)
             avg_cost = np.mean([it['avg_cost_price'] for it in inventory_items])
-            profit_pct = (current - avg_cost) / avg_cost
+            profit_pct = (current - avg_cost) / avg_cost if avg_cost > 0 else 0
 
-            # 基于盈利程度决定卖出比例
-            if profit_pct > 0.15:
-                return total_kg * 0.8  # 大赚→卖8成
-            elif profit_pct > 0.08:
-                return total_kg * 0.5
-            elif profit_pct > 0.03:
-                return total_kg * 0.3
+            if action == "止损":
+                return total_kg * 0.9  # 止损卖9成
+            if profit_pct > 0.20:
+                return total_kg * 0.85
+            elif profit_pct > 0.12:
+                return total_kg * 0.6
+            elif profit_pct > 0.06:
+                return total_kg * 0.4
+            elif profit_pct > 0.02:
+                return total_kg * 0.25
+            elif profit_pct > -0.03:
+                return total_kg * 0.15
             else:
-                return total_kg * 0.15  # 微利→少量减仓
+                return total_kg * max(0.05, confidence * 0.3)
 
-        if action == "买入":
-            # 凯利公式：f = (p*b - q) / b
-            # 简化：基于波动率的动态仓位
-            risk_per_unit = 0.02  # 单笔风险 2%
-            if volatility > 0:
-                suggested_value = risk_per_unit / (volatility * 2)
+        if action in ("买入", "加仓"):
+            # 改进的凯利公式：f = (win_prob * avg_win - loss_prob * avg_loss) / (avg_win * avg_loss)
+            win_prob = min(max(confidence, 0.3), 0.8)
+            loss_prob = 1.0 - win_prob
+            avg_win = volatility * 1.5  # 预期收益 = 1.5倍波动率
+            avg_loss = atr / current  # 预期损失 = ATR相对值
+            if avg_loss > 0:
+                kelly_f = max(0.01, (win_prob * avg_win - loss_prob * avg_loss) / max(avg_win * avg_loss, 1e-8))
+                kelly_f = min(kelly_f, 0.25)  # 凯利上限25%
             else:
-                suggested_value = 50000
+                kelly_f = 0.1
 
-            # 映射到实际数量
+            risk_per_unit = 0.02
+            if volatility > 0 and current > 0:
+                suggested_qty = (risk_per_unit * confidence) / (volatility * 2.5) * kelly_f * 100
+            else:
+                suggested_qty = 500
+
             if current < 100:
-                return max(10, suggested_value / current * 0.01)
+                return max(10, suggested_qty / current * 0.01)
             elif current < 20000:
-                return max(500, suggested_value / current * 0.1)
+                return max(500, suggested_qty / current * 0.1)
             else:
-                return max(1000, suggested_value / current * 0.05)
+                return max(1000, suggested_qty / current * 0.05)
 
-    # ═══════════════════════════════════════════════════════
-    #  🆕 v3 新增因子: 季节性 / 相关性 / 宏观 / 运营 / 风控
-    # ═══════════════════════════════════════════════════════
+        return 0
+
+    def _factor_agreement(self, scores: dict, action: str) -> float:
+        """🆕 因子一致性：各因子对决策方向的一致性比例"""
+        # 定义各因子对买入/卖出方向的期望
+        buy_favoring = ["trend", "momentum", "timeframe", "supply_demand"]
+        sell_favoring = ["operational", "risk_mgmt"]
+        # volatile/regime/sr_levels/volume 根据分数>55偏买，<45偏卖
+        directional = ["volatility", "sr_levels", "volume", "regime",
+                       "seasonal", "correlation", "macro_bias", "divergence"]
+
+        agree_count = 0
+        total_factors = 0
+
+        for k, v in scores.items():
+            total_factors += 1
+            if k in buy_favoring:
+                if v > 55 and action in ("买入", "加仓"):
+                    agree_count += 1
+                elif v < 45 and action in ("卖出", "减仓", "止损"):
+                    agree_count += 1
+                elif 45 <= v <= 55:
+                    agree_count += 0.5
+            elif k in sell_favoring:
+                if v > 55 and action in ("卖出", "减仓", "止损"):
+                    agree_count += 1
+                elif v < 45 and action in ("买入", "加仓"):
+                    agree_count += 1
+                elif 45 <= v <= 55:
+                    agree_count += 0.5
+            elif k in directional:
+                if v > 58 and action in ("买入", "加仓"):
+                    agree_count += 1
+                elif v < 42 and action in ("卖出", "减仓", "止损"):
+                    agree_count += 1
+                elif 42 <= v <= 58:
+                    agree_count += 0.5
+            else:
+                agree_count += 0.5  # 中性因子
+
+        return agree_count / max(total_factors, 1)
 
     def _score_seasonal(self, metal_type: str, ind: dict) -> tuple:
         """季节性因子：基于历史月度统计规律"""
@@ -1387,6 +1604,138 @@ class RecommendationService:
         elif volatility > 0.02:
             return "中"
         return "低"
+
+    # ═══════════════════════════════════════════════════════
+    #  🆕 v3.2 背离因子：RSI背离 + MACD背离（最强反转信号）
+    # ═══════════════════════════════════════════════════════
+
+    def _score_divergence(self, ind: dict, prices: np.ndarray) -> tuple:
+        """🆕 背离检测：RSI顶/底背离 + MACD顶/底背离
+        
+        背离 = 价格创新高/低但指标不确认，是最强的反转信号
+        顶背离 → 强烈卖出信号（价格创新高但RSI/MACD走弱）
+        底背离 → 强烈买入信号（价格创新低但RSI/MACD走强）
+        """
+        score = 50
+        reasons = []
+        n = len(prices)
+
+        if n < 40:
+            return 50, reasons
+
+        current = float(prices[-1])
+        rsi = ind.get("rsi", 50)
+        macd_hist = ind.get("macd_hist", 0)
+
+        # ── 1) RSI背离检测 ──
+        # 找最近两个价格高点（顶背离）和低点（底背离）
+        # 用最近40根K线
+        lookback = min(n, 40)
+        chunk = prices[-lookback:]
+        chunk_len = len(chunk)
+
+        rsi_divergence = 0  # 0=无背离, -1=顶背离, +1=底背离
+
+        # 计算RSI值序列用于背离检测
+        if chunk_len >= 30:
+            rsi_values = []
+            for i in range(14, chunk_len):
+                seg = chunk[:i+1]
+                rsi_val = self._wilders_rsi(seg, 14)
+                rsi_values.append(rsi_val)
+            rsi_values = np.array(rsi_values)
+
+            # 顶背离：价格最近两次高点，高点2 > 高点1 但 RSI2 < RSI1
+            half = chunk_len // 2
+            if half >= 14:
+                # 前半段和后半段的高点
+                first_half_high_idx = int(np.argmax(chunk[:half]))
+                second_half_high_idx = half + int(np.argmax(chunk[half:]))
+
+                first_high = chunk[first_half_high_idx]
+                second_high = chunk[second_half_high_idx]
+
+                if second_high > first_high * 1.005:  # 价格创新高
+                    rsi_at_first = rsi_values[first_half_high_idx - 14] if first_half_high_idx >= 14 else rsi_values[0]
+                    rsi_at_second = rsi_values[second_half_high_idx - 14] if second_half_high_idx >= 14 else rsi_values[-1]
+                    if rsi_at_second < rsi_at_first - 3:  # RSI走弱
+                        rsi_divergence = -1
+                        score -= 20
+                        reasons.append("🔄 RSI顶背离 — 价格新高但RSI走弱")
+
+                # 底背离：价格最近两次低点，低点2 < 低点1 但 RSI2 > RSI1
+                first_half_low_idx = int(np.argmin(chunk[:half]))
+                second_half_low_idx = half + int(np.argmin(chunk[half:]))
+
+                first_low = chunk[first_half_low_idx]
+                second_low = chunk[second_half_low_idx]
+
+                if second_low < first_low * 0.995:  # 价格创新低
+                    rsi_at_first_low = rsi_values[first_half_low_idx - 14] if first_half_low_idx >= 14 else rsi_values[0]
+                    rsi_at_second_low = rsi_values[second_half_low_idx - 14] if second_half_low_idx >= 14 else rsi_values[-1]
+                    if rsi_at_second_low > rsi_at_first_low + 3:  # RSI走强
+                        rsi_divergence = 1
+                        score += 20
+                        reasons.append("🔄 RSI底背离 — 价格新低但RSI走强")
+
+        # ── 2) MACD柱背离检测 ──
+        if n >= 50:
+            # 用更长周期检测MACD背离（更可靠）
+            macd_hists = []
+            for i in range(30, n):
+                seg = prices[:i+1]
+                ema12_s = self._ema_series(seg, 12)
+                ema26_s = self._ema_series(seg, 26)
+                macd_line = ema12_s[-1] - ema26_s[-1]
+                sig_s = self._ema_series((ema12_s - ema26_s), 9)
+                macd_hists.append(macd_line - sig_s[-1])
+            macd_hists = np.array(macd_hists)
+
+            macd_len = len(macd_hists)
+            if macd_len >= 20:
+                macd_half = macd_len // 2
+
+                # MACD顶背离
+                price_first_peak = np.max(prices[-(macd_len + 30):-macd_len])
+                price_second_peak = np.max(prices[-macd_len:])
+                macd_first_peak = np.max(macd_hists[:macd_half])
+                macd_second_peak = np.max(macd_hists[macd_half:])
+
+                if (price_second_peak > price_first_peak * 1.01 and
+                        macd_second_peak < macd_first_peak * 0.85):
+                    if rsi_divergence != -1:  # 不与RSI背离重复
+                        score -= 15
+                        reasons.append("📉 MACD顶背离 — 价格新高但动能衰减")
+
+                # MACD底背离
+                price_first_trough = np.min(prices[-(macd_len + 30):-macd_len])
+                price_second_trough = np.min(prices[-macd_len:])
+                macd_first_trough = np.min(macd_hists[:macd_half])
+                macd_second_trough = np.min(macd_hists[macd_half:])
+
+                if (price_second_trough < price_first_trough * 0.99 and
+                        macd_second_trough > macd_first_trough * 1.15):
+                    if rsi_divergence != 1:  # 不与RSI背离重复
+                        score += 15
+                        reasons.append("📈 MACD底背离 — 价格新低但动能企稳")
+
+        # ── 3) 隐藏背离增强（RSI趋势vs价格趋势）──
+        # 短周期：RSI在50以上持续走弱 + 价格横盘 = 隐藏顶背离
+        if 50 < rsi < 65 and macd_hist < 0:
+            recent_10_rsi_change = ind.get("rsi", 50) - self._wilders_rsi(prices[-20:-10], 14) if n >= 20 else 0
+            recent_price_change = (current - prices[-11]) / prices[-11] if n >= 11 else 0
+            if recent_10_rsi_change < -5 and abs(recent_price_change) < 0.01:
+                score -= 8
+                reasons.append("🔍 隐藏顶背离 — RSI走弱但价格横盘")
+
+        if 35 < rsi < 50 and macd_hist > 0:
+            recent_10_rsi_change = ind.get("rsi", 50) - self._wilders_rsi(prices[-20:-10], 14) if n >= 20 else 0
+            recent_price_change = (current - prices[-11]) / prices[-11] if n >= 11 else 0
+            if recent_10_rsi_change > 5 and abs(recent_price_change) < 0.01:
+                score += 8
+                reasons.append("🔍 隐藏底背离 — RSI走强但价格横盘")
+
+        return max(0, min(100, score)), reasons
 
     # ═══════════════════════════════════════════════════════
     #  技术指标库
