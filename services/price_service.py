@@ -22,6 +22,7 @@ class MetalPriceService:
         self._use_real = False
         self._real_prices = {}     # {metal: {"price":..., "change_pct":..., ...}}
         self._last_update = None   # 最后刷新时间
+        self._max_cache_entries = 50  # 🆕 限制缓存大小，防止内存泄漏
 
     # ============================================================
     #  公开接口
@@ -52,6 +53,18 @@ class MetalPriceService:
         cache_key = (metal_type, days)
         if cache_key in self._history_cache:
             return self._history_cache[cache_key]
+
+        # 🆕 缓存管理：超过限制时清理最旧的条目
+        if len(self._history_cache) > self._max_cache_entries:
+            # 保留最近访问的条目（按需式LRU近似）
+            keys_to_keep = sorted(
+                self._history_cache.keys(),
+                key=lambda k: k[1] if isinstance(k, tuple) and len(k) > 1 else 0,
+                reverse=True
+            )[:self._max_cache_entries // 2]
+            for k in list(self._history_cache.keys()):
+                if k not in keys_to_keep:
+                    del self._history_cache[k]
 
         # 长缓存切片复用
         for (mt, cd), (df_full, src) in self._history_cache.items():
@@ -380,55 +393,14 @@ class MetalPriceService:
             try:
                 import akshare as ak
                 from config import METAL_TYPES
-                raw = {}
 
-                # 1) 现货行情 — 直连新浪
+                # 1) 现货行情 — 复用 refresh_spot_only 避免重复代码
+                spot_result = self.refresh_spot_only()
+                if not spot_result["success"]:
+                    result["message"] = spot_result.get("message", "现货获取失败")
+                    return
+
                 history_dfs = {}
-                try:
-                    import urllib.request, re
-                    sym_list = []
-                    sym_metal = {}
-                    for metal, cfg in METAL_TYPES.items():
-                        code = cfg.get('futures_code')
-                        if code and not cfg.get('is_scrap'):
-                            sym_list.append(code)
-                            sym_metal[code.upper()] = metal
-                    if sym_list:
-                        url = "http://hq.sinajs.cn/list=" + ",".join(sym_list)
-                        req = urllib.request.Request(url)
-                        req.add_header("Referer", "https://finance.sina.com.cn")
-                        resp = urllib.request.urlopen(req, timeout=8)
-                        raw_text = resp.read().decode("gbk")
-                        for line in raw_text.strip().split("\n"):
-                            m = re.match(r"var hq_str_(\w+)=\"(.+)\"", line)
-                            if not m:
-                                continue
-                            sym = m.group(1).upper()
-                            fields = m.group(2).split(",")
-                            metal = sym_metal.get(sym)
-                            if not metal:
-                                base = re.sub(r'\d+$', '', sym)
-                                for c, mn in sym_metal.items():
-                                    if re.sub(r'\d+$', '', c) == base:
-                                        metal = mn
-                                        break
-                            if metal and len(fields) >= 9:
-                                try:
-                                    p = float(fields[3])
-                                    prev = float(fields[2]) if fields[2] else 0
-                                    chg = (p - prev) / prev * 100 if prev > 0 else 0
-                                    if p > 0:
-                                        raw[metal] = {
-                                            "price": p,
-                                            "change_pct": round(chg, 2),
-                                            "high": float(fields[4]) if fields[4] else p * 1.005,
-                                            "low": float(fields[5]) if fields[5] else p * 0.995,
-                                            "volume": int(float(fields[8])) if len(fields) > 8 and fields[8] else 0,
-                                        }
-                                except (ValueError, IndexError):
-                                    pass
-                except Exception as e:
-                    logger.warning(f"spot: {e}")
 
                 # 2) 历史K线 — 所有精炼金属逐个获取
                 for metal, cfg in METAL_TYPES.items():
@@ -441,8 +413,8 @@ class MetalPriceService:
                         kline = ak.futures_main_sina(symbol=code)
                         if kline is not None and not kline.empty:
                             history_dfs[metal] = kline
-                            # 如果现货没取到，用最后收盘价
-                            if metal not in raw:
+                            # 如果现货没取到，用最后收盘价补充
+                            if metal not in self._real_prices:
                                 try:
                                     kline_records = kline.to_dict('records')
                                 except Exception:
@@ -451,7 +423,7 @@ class MetalPriceService:
                                     last = kline_records[-1]
                                     p = _sf(last, '收盘价', 'close')
                                     if p > 0:
-                                        raw[metal] = {
+                                        self._real_prices[metal] = {
                                             "price": p, "change_pct": 0,
                                             "high": p*1.005, "low": p*0.995, "volume": 0,
                                         }
@@ -476,10 +448,10 @@ class MetalPriceService:
                         self._real_history[metal] = scrap_df
 
                     # 废金属现货
-                    if cfg.get("is_scrap") and cfg.get("ref_metal") in raw:
-                        ref_d = raw[cfg["ref_metal"]]
+                    if cfg.get("is_scrap") and cfg.get("ref_metal") in self._real_prices:
+                        ref_d = self._real_prices[cfg["ref_metal"]]
                         ratio = cfg.get("ratio", 0.6)
-                        raw[metal] = {
+                        self._real_prices[metal] = {
                             "price": ref_d["price"] * ratio,
                             "change_pct": ref_d["change_pct"],
                             "high": ref_d["high"] * ratio,
@@ -487,21 +459,19 @@ class MetalPriceService:
                             "volume": 0,
                         }
 
-                # 5) 填充缺失
+                # 5) 填充缺失（使用已通过refresh_spot_only设置的_real_prices）
                 for metal, cfg in METAL_TYPES.items():
-                    if metal not in raw:
+                    if metal not in self._real_prices:
                         bp = cfg.get("base_price", 50000)
-                        raw[metal] = {"price": bp, "change_pct": 0,
+                        self._real_prices[metal] = {"price": bp, "change_pct": 0,
                                       "high": bp*1.005, "low": bp*0.995, "volume": 0}
-
-                self._real_prices = raw
                 self._use_real = True
                 self._last_update = datetime.now()
                 self._history_cache.clear()
                 k_count = len(self._real_history)
                 result["success"] = True
-                result["message"] = f"已连接SHFE，{len(raw)}品种 + {k_count}个K线"
-                result["data"] = {m: d["price"] for m, d in raw.items()}
+                result["message"] = f"已连接SHFE，{len(self._real_prices)}品种 + {k_count}个K线"
+                result["data"] = {m: d["price"] for m, d in self._real_prices.items()}
             except Exception as e:
                 result["message"] = str(e)[:100]
                 logger.error(f"fetch: {e}")
