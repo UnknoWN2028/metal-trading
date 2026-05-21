@@ -1,6 +1,6 @@
 """
 Streamlit Cloud 入口文件
-有色金属回收倒卖AI系统 v3
+有色金属回收倒卖AI系统 v3.2
 
 此文件用于 Streamlit Cloud 部署，本地开发可直接用:
     streamlit run streamlit_app.py

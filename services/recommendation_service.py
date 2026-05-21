@@ -53,7 +53,7 @@ RANGING_WEIGHT_ADJ = {
 
 
 class RecommendationService:
-    """v2 多因子AI推荐引擎"""
+    """v3.2 多因子AI推荐引擎"""
 
     def __init__(self, session_factory, price_service=None, llm_service=None):
         self.session_factory = session_factory

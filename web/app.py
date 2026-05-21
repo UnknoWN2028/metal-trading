@@ -165,7 +165,7 @@ with st.sidebar:
         'background:linear-gradient(90deg,#C8923A,#D4832A);'
         '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
         'background-clip:text;">🔩 Metal AI Trading</span>'
-        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3 专业版</div></div>',
+        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3.2 专业版</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -577,7 +577,7 @@ elif page == "🤖 AI推荐":
             st.cache_data.clear()
             st.rerun()
     with col_info:
-        st.caption("v3 多因子引擎 · 技术面+基本面+运营面 + DeepSeek AI")
+        st.caption("v3.2 14因子引擎 · 背离检测 + 动态权重 + DeepSeek AI")
 
     try:
         with st.spinner("🧠 多因子引擎分析中..."):
@@ -972,7 +972,7 @@ else:
     real_label = "🟡 本地模拟数据"
 st.markdown(
     f'<div style="text-align:center;color:#9CA3AF;font-size:0.78rem;padding:4px 0;">'
-    f'🔩 Metal AI Trading System v3 · 13因子智能推荐 · {real_label}'
+    f'🔩 Metal AI Trading System v3.2 · 14因子智能推荐 · {real_label}'
     '</div>',
     unsafe_allow_html=True,
 )
