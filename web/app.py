@@ -318,7 +318,7 @@ with st.sidebar:
             st.session_state.pop("_sidebar_fetch_ts", None)
             st.rerun()
         # 🆕 轻量刷新按钮（仅刷新价格+快讯，不重算AI，不跳页）
-        lite_clicked = st.button("🔃", width='stretch',
+        lite_clicked = st.button("LITE", width='stretch',
                                  key="_lite_refresh",
                                  help="轻量刷新（仅更新侧边栏数据）")
         if lite_clicked:
@@ -338,15 +338,10 @@ if real_enabled and st.session_state.get("_auto_refresh", True):
         if (!window._metalAutoRefresh) {
             window._metalAutoRefresh = setInterval(function() {
                 var btns = window.parent.document.querySelectorAll('button');
-                // 🆕 优先找轻量刷新按钮（🔃），不清缓存不跳页
-                var liteBtn = null;
                 for (var i = 0; i < btns.length; i++) {
-                    if (btns[i].textContent.trim() === '\ud83d\udd03') {
-                        liteBtn = btns[i]; break;
+                    if (btns[i].textContent.indexOf('LITE') >= 0) {
+                        btns[i].click(); break;
                     }
-                }
-                if (liteBtn) {
-                    liteBtn.click();
                 }
             }, 120000);
         }
