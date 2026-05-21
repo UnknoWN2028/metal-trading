@@ -43,9 +43,9 @@ inject_css()
 PAGE_KEY = "nav_page"
 if PAGE_KEY not in st.session_state:
     st.session_state[PAGE_KEY] = "📊 仪表盘"
-_qp = st.query_params.get_all()
+_qp = st.query_params
 if "p" in _qp:
-    code = _qp["p"] if isinstance(_qp["p"], str) else _qp["p"][0]
+    code = _qp["p"]
     page_map = {
         "db": "📊 仪表盘", "hq": "💰 实时行情", "kc": "📦 库存管理",
         "ai": "🤖 AI推荐", "zs": "📈 走势分析", "yj": "🔔 价格预警",
