@@ -56,11 +56,19 @@ public class MainActivity extends Activity {
 
         configureWebView();
 
+        // 🆕 只在WebView滚动到顶部时允许下拉刷新
+        webView.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            swipeRefresh.setEnabled(scrollY == 0);
+        });
+
+        // 🆕 初始禁用下拉刷新，等页面加载完+滚动到顶部时自动启用
+        swipeRefresh.setEnabled(false);
+
         swipeRefresh.setColorSchemeResources(
                 R.color.primary, R.color.accent, R.color.primary_dark);
         swipeRefresh.setOnRefreshListener(() -> {
             pageFinished = false;
-            // 🆕 下拉刷新不清除缓存，只重新加载页面（利用已缓存资源）
+            swipeRefresh.setEnabled(false);  // 🆕 刷新期间禁用
             webView.reload();
         });
 
@@ -134,6 +142,10 @@ public class MainActivity extends Activity {
                 pageFinished = true;
                 progressBar.setVisibility(View.GONE);
                 swipeRefresh.setRefreshing(false);
+                // 🆕 页面加载完，如果滚动在顶部则启用下拉刷新
+                if (view.getScrollY() == 0) {
+                    swipeRefresh.setEnabled(true);
+                }
             }
 
             @Override
@@ -241,6 +253,8 @@ public class MainActivity extends Activity {
                 + "<p style='color:#4B5563;font-size:11px;margin-top:8px;word-break:break-all;max-width:280px;'>"
                 + appUrl + "</p></body></html>";
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
+        // 🆕 离线页允许下拉刷新重试
+        swipeRefresh.setEnabled(true);
     }
 
     private void showUrlDialog() {

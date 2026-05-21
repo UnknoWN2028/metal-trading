@@ -703,6 +703,14 @@ def mobile_bottom_nav():
         .mobile-bottom-bar .nav-item:active {
             background: #F0F4FF;
         }
+        .mobile-bottom-bar .nav-item.active .nav-label {
+            color: #C8923A;
+            font-weight: 700;
+        }
+        .mobile-bottom-bar .nav-item.active .nav-icon {
+            transform: scale(1.15);
+            filter: brightness(1.1);
+        }
         .mobile-bottom-bar .nav-icon {
             font-size: 1.2rem;
             line-height: 1;
@@ -787,21 +795,17 @@ def mobile_bottom_nav():
         <!-- 移动端顶部工具栏 -->
         <div class="mobile-top-toolbar">
             <div class="toolbar-btn" onclick="
-                var sb = window.parent.document.querySelector('[data-testid=\"stSidebar\"]');
+                var sb = document.querySelector('[data-testid=&quot;stSidebar&quot;]');
                 if(sb) {
-                    var btn = sb.querySelector('button[aria-label=\"Close sidebar\"], button[kind=\"header\"]');
-                    if(btn) btn.click(); else {
-                        var hamburger = window.parent.document.querySelector('button[kind=\"header\"][data-testid=\"baseButton-header\"]');
-                        if(!hamburger) hamburger = window.parent.document.querySelector('[data-testid=\"collapsedControl\"]');
-                        if(hamburger) hamburger.click();
-                    }
+                    var btn = sb.querySelector('button[kind=&quot;header&quot;]');
+                    if(btn) btn.click();
                 }
             " title="菜单">☰</div>
             <div class="toolbar-title" id="mobile-page-title">仪表盘</div>
             <div class="toolbar-btn" onclick="
-                var btns = window.parent.document.querySelectorAll('button');
+                var btns = document.querySelectorAll('button');
                 for(var i=0;i<btns.length;i++){
-                    if(btns[i].textContent.includes('强制刷新')||btns[i].textContent.includes('刷新')){
+                    if(btns[i].textContent.indexOf('LITE')>=0){
                         btns[i].click();break;
                     }
                 }
@@ -841,18 +845,53 @@ def mobile_bottom_nav():
             // 更新顶部标题
             var titleEl = document.getElementById('mobile-page-title');
             if (titleEl) {
-                var shortName = pageName.replace(/^[^ ]+ /, '');
-                titleEl.textContent = shortName;
+                // 🆕 去掉emoji前缀（安全正则，避免Python字符串转义问题）
+                var shortName = pageName.replace(/^[^a-zA-Z\u4e00-\u9fff]+/, '');
+                titleEl.textContent = shortName || pageName;
             }
-            // 在侧边栏中找到对应 radio 并点击
-            var sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+
+            // 🆕 修复：直接用document（不用parent），多策略匹配radio
+            var doc = document;
+
+            // 策略1：data-testid选择器找侧边栏
+            var sidebar = doc.querySelector('[data-testid="stSidebar"]');
+
+            // 策略2：如果找不到，用类名
+            if (!sidebar) {
+                var sections = doc.querySelectorAll('section');
+                for (var i = 0; i < sections.length; i++) {
+                    if (sections[i].getAttribute('data-testid') === 'stSidebar') {
+                        sidebar = sections[i];
+                        break;
+                    }
+                }
+            }
+
             if (!sidebar) return;
-            var labels = sidebar.querySelectorAll('div[role="radiogroup"] label');
+
+            // 找radiogroup内的所有选项
+            var group = sidebar.querySelector('[role="radiogroup"]');
+            if (!group) return;
+
+            var labels = group.querySelectorAll('label, [role="radio"]');
+            var targetText = pageName.replace(/^[^a-zA-Z\u4e00-\u9fff]+/, '');
+
             for (var i = 0; i < labels.length; i++) {
-                if (labels[i].textContent.includes(pageName.replace(/^[^ ]+ /, ''))) {
+                var text = labels[i].textContent || labels[i].innerText || '';
+                if (text.indexOf(targetText) >= 0) {
                     labels[i].click();
+                    // 🆕 点击后高亮当前nav项
+                    highlightNav(i);
                     break;
                 }
+            }
+        }
+
+        // 🆕 高亮当前选中的底部导航项
+        function highlightNav(idx) {
+            var items = document.querySelectorAll('.nav-item');
+            for (var i = 0; i < items.length; i++) {
+                items[i].classList.toggle('active', i === idx);
             }
         }
 
@@ -860,12 +899,14 @@ def mobile_bottom_nav():
         (function() {
             var lastTitle = '';
             setInterval(function() {
-                var h1 = window.parent.document.querySelector('h1');
+                var h1 = document.querySelector('h1');
                 var current = h1 ? h1.textContent.trim() : '';
                 if (current && current !== lastTitle) {
                     lastTitle = current;
                     var titleEl = document.getElementById('mobile-page-title');
-                    if (titleEl) titleEl.textContent = current.replace(/^[^ ]+ /, '');
+                    if (titleEl) {
+                        titleEl.textContent = current.replace(/^[^a-zA-Z\u4e00-\u9fff]+/, '');
+                    }
                 }
             }, 500);
         })();

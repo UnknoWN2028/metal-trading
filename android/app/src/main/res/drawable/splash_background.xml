@@ -1,34 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 🆕 启动画面背景：金色渐变 + 品牌logo -->
+<!-- 🆕 启动画面：纯色背景，Android系统级即时显示 -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 背景色 -->
     <item>
-        <shape android:shape="rectangle">
-            <gradient
-                android:startColor="#1A1D26"
-                android:endColor="#0F1117"
-                android:angle="180" />
-        </shape>
+        <color android:color="#1A1D26" />
     </item>
-    <!-- 中间logo区域 -->
     <item
         android:gravity="center"
-        android:width="120dp"
-        android:height="120dp">
+        android:width="72dp"
+        android:height="72dp"
+        android:top="-16dp">
         <shape android:shape="oval">
             <gradient
-                android:startColor="#D4A460"
+                android:startColor="#F0C060"
                 android:endColor="#C8923A"
                 android:type="radial"
-                android:gradientRadius="60dp" />
-        </shape>
-    </item>
-    <!-- 文字 -->
-    <item
-        android:gravity="center"
-        android:top="140dp">
-        <shape android:shape="rectangle">
-            <solid android:color="@android:color/transparent" />
+                android:gradientRadius="36dp" />
         </shape>
     </item>
 </layer-list>
