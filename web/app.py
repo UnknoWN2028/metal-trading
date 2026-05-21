@@ -19,6 +19,7 @@ from web.styles import (
     confidence_indicator, empty_state, factor_scores_card,
     recommendation_card, styled_plotly, plotly_theme,
     mobile_kpi_row, mobile_bottom_nav,
+    PLOTLY_FAST_CONFIG,
 )
 import pandas as pd
 import plotly.graph_objects as go
@@ -115,44 +116,67 @@ if _real_enabled:
 
 
 # ═══════════════════════════════════════════════════════════
-#  缓存装饰器
+#  缓存装饰器 — v3.3 优化TTL + 批量预取
 # ═══════════════════════════════════════════════════════════
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)  # 🆕 60s→300s，侧边栏不需要秒级刷新
 def get_cached_prices():
     return services["price"].fetch_all_current_prices()
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)  # 🆕 60s→300s
 def get_cached_summaries():
     return services["price"].get_all_price_summaries()
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner="🧠 多因子引擎分析中...")  # 🆕 300s→600s，仪表盘不需要实时推荐
 def get_cached_recommendations():
     return services["recommendation"].get_top_opportunities(top_n=5)
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
 def get_inventory_summary():
     return services["inventory"].get_inventory_summary()
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
 def get_profit_summary(days=30):
     return services["inventory"].get_profit_summary(days=days)
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
 def get_all_inventory():
     return services["inventory"].get_all_inventory()
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
 def get_transactions(limit=100):
     return services["inventory"].get_transaction_history(limit=limit)
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)  # 🆕 300s→600s
 def get_history_cached(metal, days):
     df, _src = services["price"].get_historical_prices(metal, days=days)
     return df
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)  # 🆕 300s→600s，新闻不需要频繁刷新
 def get_news_headlines(limit=8):
     return services["news"].get_market_headlines(limit=limit)
+
+
+# ═══════════════════════════════════════════════════════════
+#  🆕 侧边栏数据预取（存入session_state避免切页重算）
+# ═══════════════════════════════════════════════════════════
+SIDEBAR_CACHE_TTL = 300  # 侧边栏数据刷新间隔（秒）
+_now_ts = datetime.now().timestamp()
+_last_sidebar_fetch = st.session_state.get("_sidebar_fetch_ts", 0)
+_sidebar_stale = (_now_ts - _last_sidebar_fetch) > SIDEBAR_CACHE_TTL
+
+if "_sidebar_prices" not in st.session_state or _sidebar_stale:
+    try:
+        st.session_state["_sidebar_prices"] = get_cached_prices()
+        st.session_state["_sidebar_news"] = get_news_headlines(5)
+        st.session_state["_sidebar_fetch_ts"] = _now_ts
+    except Exception:
+        if "_sidebar_prices" not in st.session_state:
+            st.session_state["_sidebar_prices"] = []
+        if "_sidebar_news" not in st.session_state:
+            st.session_state["_sidebar_news"] = []
+
+_sidebar_prices = st.session_state.get("_sidebar_prices", [])
+_sidebar_news = st.session_state.get("_sidebar_news", [])
 
 
 # ═══════════════════════════════════════════════════════════
@@ -223,8 +247,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("⚡ 快速行情")
     try:
-        prices = get_cached_prices()
-        for p in prices[:6]:
+        for p in _sidebar_prices[:6]:
             chg = p.get('change_pct', 0)
             sign = "+" if chg >= 0 else ""
             color = "#10B981" if chg >= 0 else "#EF4444"
@@ -243,9 +266,8 @@ with st.sidebar:
     st.markdown("---")
     st.caption("📰 金属快讯")
     try:
-        headlines = get_news_headlines(5)
-        if headlines:
-            for h in headlines[:5]:
+        if _sidebar_news:
+            for h in _sidebar_news[:5]:
                 content = h['content']
                 if len(content) > 50:
                     content = content[:48] + ".."
@@ -285,7 +307,11 @@ with st.sidebar:
     col_r, col_v = st.columns([3, 2])
     with col_r:
         if st.button("🔄 强制刷新", width='stretch'):
+            # 🆕 轻量刷新：仅清除轻量缓存，保留AI分析结果
             st.cache_data.clear()
+            st.session_state.pop("_sidebar_prices", None)
+            st.session_state.pop("_sidebar_news", None)
+            st.session_state.pop("_sidebar_fetch_ts", None)
             st.rerun()
     with col_v:
         st.caption(datetime.now().strftime("%H:%M"))
@@ -346,7 +372,7 @@ if page == "📊 仪表盘":
             fig.update_traces(marker=dict(line=dict(width=0)))
             styled_plotly(fig)
             fig.update_layout(height=320, showlegend=False)
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
 
     with right:
         section_header("📦 库存分布", "持仓市值构成")
@@ -371,45 +397,35 @@ if page == "📊 仪表盘":
             )
             styled_plotly(fig)
             fig.update_layout(height=320, showlegend=False)
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
         else:
             empty_state("暂无库存数据", "📦")
 
     st.markdown("---")
 
-    section_header("🤖 AI 智能推荐", "v3 多因子分析 · 技术面+基本面+运营面")
+    section_header("🤖 AI 智能推荐", "v3.3 多因子分析 · 点击「AI推荐」页面查看详情")
+    # 🆕 仪表盘不再触发全量分析，仅显示最近缓存结果或跳转提示
     try:
-        with st.spinner("🧠 正在运行多因子分析引擎..."):
-            opps = get_cached_recommendations()
-        rc1, rc2 = st.columns(2)
-
-        with rc1:
-            st.markdown("#### 🟢 推荐买入")
-            for i, rec in enumerate(opps.get("top_buy", [])[:3], 1):
-                recommendation_card(rec, i, "buy")
-                with st.expander("📊 评分明细 & 理由"):
-                    factor_scores_card(rec.get('trend_analysis', {}))
-                    st.caption(rec.get('reason', ''))
-                if rec.get('llm_available') and rec.get('llm_analysis'):
-                    with st.expander("🧠 DeepSeek AI 分析"):
-                        st.markdown(rec['llm_analysis'])
-            if not opps.get("top_buy"):
-                empty_state("暂无强烈买入信号", "📈")
-
-        with rc2:
-            st.markdown("#### 🔴 推荐卖出")
-            for i, rec in enumerate(opps.get("top_sell", [])[:3], 1):
-                recommendation_card(rec, i, "sell")
-                with st.expander("📊 评分明细 & 理由"):
-                    factor_scores_card(rec.get('trend_analysis', {}))
-                    st.caption(rec.get('reason', ''))
-                if rec.get('llm_available') and rec.get('llm_analysis'):
-                    with st.expander("🧠 DeepSeek AI 分析"):
-                        st.markdown(rec['llm_analysis'])
-            if not opps.get("top_sell"):
-                empty_state("暂无强烈卖出信号", "📉")
-    except Exception as e:
-        st.warning(f"推荐生成中，请稍后刷新...")
+        # 尝试从 session_state 读取最近一次AI分析结果（由AI推荐页写入）
+        latest_recs = st.session_state.get("_latest_recs")
+        if latest_recs:
+            rc1, rc2 = st.columns(2)
+            with rc1:
+                st.markdown("#### 🟢 推荐买入")
+                for i, rec in enumerate(latest_recs.get("top_buy", [])[:2], 1):
+                    recommendation_card(rec, i, "buy")
+                if not latest_recs.get("top_buy"):
+                    st.caption("暂无强烈买入信号")
+            with rc2:
+                st.markdown("#### 🔴 推荐卖出")
+                for i, rec in enumerate(latest_recs.get("top_sell", [])[:2], 1):
+                    recommendation_card(rec, i, "sell")
+                if not latest_recs.get("top_sell"):
+                    st.caption("暂无强烈卖出信号")
+        else:
+            st.info("💡 切换到「🤖 AI推荐」页面运行多因子分析引擎", icon="🧠")
+    except Exception:
+        st.info("💡 切换到「🤖 AI推荐」页面运行多因子分析引擎", icon="🧠")
 
     st.markdown("---")
     section_header("📋 最近交易", "")
@@ -582,6 +598,8 @@ elif page == "🤖 AI推荐":
     try:
         with st.spinner("🧠 多因子引擎分析中..."):
             opps = get_cached_recommendations()
+        # 🆕 保存到session_state，仪表盘可直接读取
+        st.session_state["_latest_recs"] = opps
         bc, sc = st.columns(2)
 
         with bc:
@@ -690,7 +708,7 @@ elif page == "📈 走势分析":
         height=420, hovermode='x unified',
         legend=dict(orientation='h', yanchor='bottom', y=1.02),
     )
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
 
     # 走势统计：使用 mobile_kpi_row 统一布局
     chg = (df['price'].iloc[-1] - df['price'].iloc[0]) / df['price'].iloc[0] * 100
@@ -727,7 +745,7 @@ elif page == "📈 走势分析":
             legend=dict(orientation='h', yanchor='bottom', y=1.02),
             yaxis=dict(ticksuffix='%'),
         )
-        st.plotly_chart(fig2, width='stretch')
+        st.plotly_chart(fig2, width='stretch', config=PLOTLY_FAST_CONFIG)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -928,7 +946,7 @@ elif page == "📊 利润分析":
         fig.update_traces(marker=dict(line=dict(width=0)))
         styled_plotly(fig)
         fig.update_layout(height=350, showlegend=False)
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
 
         st.dataframe(
             df_inv[['metal_type', 'quantity_kg', 'avg_cost_price',
@@ -972,7 +990,7 @@ else:
     real_label = "🟡 本地模拟数据"
 st.markdown(
     f'<div style="text-align:center;color:#9CA3AF;font-size:0.78rem;padding:4px 0;">'
-    f'🔩 Metal AI Trading System v3.2 · 14因子智能推荐 · {real_label}'
+    f'🔩 Metal AI Trading System v3.3 · 14因子智能推荐 · {real_label}'
     '</div>',
     unsafe_allow_html=True,
 )

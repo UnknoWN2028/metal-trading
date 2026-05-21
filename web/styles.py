@@ -1041,3 +1041,11 @@ def styled_plotly(fig):
     theme = plotly_theme()
     fig.update_layout(**theme)
     return fig
+
+
+# 🆕 Plotly 快速渲染配置（禁用modebar减少JS开销）
+PLOTLY_FAST_CONFIG = {
+    "displayModeBar": False,
+    "responsive": True,
+    "displaylogo": False,
+}
