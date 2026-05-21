@@ -90,7 +90,10 @@ if "_auto_connected" not in st.session_state:
             _safe_toast(f"✅ {result['message']}")
         else:
             _safe_toast(f"⚠️ {result.get('message', 'SHFE连接失败')}")
-        st.cache_data.clear()
+        # 🆕 轻量刷新：不清除所有缓存，仅刷新侧边栏
+        st.session_state.pop("_sidebar_prices", None)
+        st.session_state.pop("_sidebar_news", None)
+        st.session_state.pop("_sidebar_fetch_ts", None)
         st.rerun()
 
 
@@ -189,7 +192,7 @@ with st.sidebar:
         'background:linear-gradient(90deg,#C8923A,#D4832A);'
         '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
         'background-clip:text;">🔩 Metal AI Trading</span>'
-        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3.2 专业版</div></div>',
+        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3.3 专业版</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -198,6 +201,7 @@ with st.sidebar:
         ["📊 仪表盘", "💰 实时行情", "📦 库存管理", "🤖 AI推荐",
          "📈 走势分析", "🔔 价格预警", "📋 交易记录", "👥 客户供应商", "📊 利润分析"],
         label_visibility="collapsed",
+        key="nav_page",  # 🆕 显式key防止st.rerun()时丢失状态
     )
 
     st.markdown("---")
@@ -307,8 +311,17 @@ with st.sidebar:
     col_r, col_v = st.columns([3, 2])
     with col_r:
         if st.button("🔄 强制刷新", width='stretch'):
-            # 🆕 轻量刷新：仅清除轻量缓存，保留AI分析结果
+            # 完全清缓存 + 重算
             st.cache_data.clear()
+            st.session_state.pop("_sidebar_prices", None)
+            st.session_state.pop("_sidebar_news", None)
+            st.session_state.pop("_sidebar_fetch_ts", None)
+            st.rerun()
+        # 🆕 轻量刷新按钮（仅刷新价格+快讯，不重算AI，不跳页）
+        lite_clicked = st.button("🔃", width='stretch',
+                                 key="_lite_refresh",
+                                 help="轻量刷新（仅更新侧边栏数据）")
+        if lite_clicked:
             st.session_state.pop("_sidebar_prices", None)
             st.session_state.pop("_sidebar_news", None)
             st.session_state.pop("_sidebar_fetch_ts", None)
@@ -317,7 +330,7 @@ with st.sidebar:
         st.caption(datetime.now().strftime("%H:%M"))
 
 
-# ── 自动刷新注入（每 120 秒轻量刷新） ──
+# ── 自动刷新注入（每120秒仅更新侧边栏数据，不清缓存不重算AI） ──
 if real_enabled and st.session_state.get("_auto_refresh", True):
     st.markdown(
         """
@@ -325,10 +338,15 @@ if real_enabled and st.session_state.get("_auto_refresh", True):
         if (!window._metalAutoRefresh) {
             window._metalAutoRefresh = setInterval(function() {
                 var btns = window.parent.document.querySelectorAll('button');
+                // 🆕 优先找轻量刷新按钮（🔃），不清缓存不跳页
+                var liteBtn = null;
                 for (var i = 0; i < btns.length; i++) {
-                    if (btns[i].textContent.includes('强制刷新')) {
-                        btns[i].click(); break;
+                    if (btns[i].textContent.trim() === '\ud83d\udd03') {
+                        liteBtn = btns[i]; break;
                     }
+                }
+                if (liteBtn) {
+                    liteBtn.click();
                 }
             }, 120000);
         }
