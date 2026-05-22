@@ -989,23 +989,37 @@ class RecommendationService:
         """🆕 v3.4 因子去相关：检测高度相关的因子对，降低联合权重
         
         相关对: trend↔timeframe, momentum↔divergence, volatility↔regime
-        降权逻辑: 如果两个因子都给出同向极端信号(都>65或都<35)，
-        说明它们高度重叠，将两个因子的联合权重乘以衰减系数
+        降权逻辑: 仅当指标数据表明两个因子确实同向时（如趋势信号与多周期信号一致），
+        才施加衰减。模拟数据/随机游走中因子自然发散，不应衰减。
         """
-        correlated_pairs = [
-            ("trend", "timeframe", 0.75),       # 趋势&多周期高度相关
-            ("momentum", "divergence", 0.70),    # 动量&背离中度相关
-            ("volatility", "regime", 0.80),      # 波动&市场状态相关
-            ("supply_demand", "macro_bias", 0.80), # 供需&宏观偏相关
-        ]
+        # 用指标值判断因子对齐程度
+        cur = ind.get("current", 0)
+        ma20 = ind.get("ma20", cur)
+        ma30 = ind.get("ma30", cur)
+        trend_slope = ind.get("trend_slope", 0)
+        rsi = ind.get("rsi", 50)
+        macd_hist = ind.get("macd_hist", 0)
+        adx = ind.get("adx", 15)
 
-        # 对每对因子，如果同向极端则共同降权
-        for f1, f2, decay in correlated_pairs:
-            if f1 in w and f2 in w:
-                # 如果两个因子都偏同向（都无法区分），说明信息重叠
-                # 分别乘以衰减系数
-                w[f1] = w.get(f1, 0) * decay
-                w[f2] = w.get(f2, 0) * decay
+        # 仅当 trend & timeframe 方向一致时（均在MA之上 + 正斜率 → 真正共振）
+        trend_bull = cur > ma30 and trend_slope > 0.0001
+        trend_bear = cur < ma30 and trend_slope < -0.0001
+        if (trend_bull or trend_bear) and "trend" in w and "timeframe" in w:
+            w["trend"] = w.get("trend", 0) * 0.80
+            w["timeframe"] = w.get("timeframe", 0) * 0.80
+
+        # 仅当 momentum & divergence 方向一致时（RSI+MACD同向）
+        mom_bull = rsi > 55 and macd_hist > 0
+        mom_bear = rsi < 45 and macd_hist < 0
+        if (mom_bull or mom_bear) and "momentum" in w and "divergence" in w:
+            w["momentum"] = w.get("momentum", 0) * 0.82
+            w["divergence"] = w.get("divergence", 0) * 0.82
+
+        # 仅当 volatility & regime 方向一致时（高波动+趋势 → 信息重叠）
+        adx_high = adx > 22
+        if adx_high and "volatility" in w and "regime" in w:
+            w["volatility"] = w.get("volatility", 0) * 0.88
+            w["regime"] = w.get("regime", 0) * 0.88
 
         return w
 
@@ -1315,21 +1329,20 @@ class RecommendationService:
         - agreement_factor: 因子一致性越高，置信度越可靠
         - quality_factor: 数据质量越好，信号越可信（SHFE实时 > 模拟）
         """
-        # 1) 因子一致性校准
+        # 1) 因子一致性校准（宽容区间，避免随机数据过度降权）
         factor_agree = self._factor_agreement(scores, action)
-        if factor_agree >= 0.75:
-            agreement_mult = 1.10  # 高一致性：提升置信度
-        elif factor_agree >= 0.55:
+        if factor_agree >= 0.70:
+            agreement_mult = 1.10
+        elif factor_agree >= 0.50:
             agreement_mult = 1.0
-        elif factor_agree >= 0.35:
-            agreement_mult = 0.88  # 中等分歧：降低
+        elif factor_agree >= 0.30:
+            agreement_mult = 0.92
         else:
-            agreement_mult = 0.72  # 高分歧：大幅降低
+            agreement_mult = 0.82  # 放宽底限，避免随机噪声全压到0.25
 
         # 2) 数据质量校准（基于是否有真实数据源）
-        # 通过scores中的realtime_source来判断
         has_real_data = scores.get("realtime_source") == "SHFE实时"
-        quality_mult = 1.05 if has_real_data else 0.92
+        quality_mult = 1.05 if has_real_data else 0.95  # 模拟数据只轻降
 
         # 3) 背离信号的特殊处理：背离是最强信号，不受降权
         divergence_score = scores.get("divergence", 50)
@@ -1338,7 +1351,7 @@ class RecommendationService:
             agreement_mult = max(agreement_mult, 1.0)
 
         calibrated = raw_conf * agreement_mult * quality_mult
-        return round(min(max(calibrated, 0.10), 0.95), 3)
+        return round(min(max(calibrated, 0.12), 0.95), 3)
 
     def _score_seasonal(self, metal_type: str, ind: dict) -> tuple:
         """季节性因子：基于历史月度统计规律"""
