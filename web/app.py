@@ -194,7 +194,7 @@ with st.sidebar:
         'background:linear-gradient(90deg,#C8923A,#D4832A);'
         '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
         'background-clip:text;">🔩 Metal AI Trading</span>'
-        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3.3 专业版</div></div>',
+        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3.4 统计增强版</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -416,7 +416,7 @@ if page == "📊 仪表盘":
 
     st.markdown("---")
 
-    section_header("🤖 AI 智能推荐", "v3.3 多因子分析 · 点击「AI推荐」页面查看详情")
+    section_header("🤖 AI 智能推荐", "v3.4 多因子分析 · 点击「AI推荐」页面查看详情")
     # 🆕 仪表盘不再触发全量分析，仅显示最近缓存结果或跳转提示
     try:
         # 尝试从 session_state 读取最近一次AI分析结果（由AI推荐页写入）
@@ -606,7 +606,7 @@ elif page == "🤖 AI推荐":
             st.cache_data.clear()
             st.rerun()
     with col_info:
-        st.caption("v3.2 14因子引擎 · 背离检测 + 动态权重 + DeepSeek AI")
+        st.caption("v3.4 14因子引擎 · Hurst指数 + 三峰背离 + Half-Kelly + DeepSeek AI")
 
     try:
         with st.spinner("🧠 多因子引擎分析中..."):
@@ -1003,7 +1003,7 @@ else:
     real_label = "🟡 本地模拟数据"
 st.markdown(
     f'<div style="text-align:center;color:#9CA3AF;font-size:0.78rem;padding:4px 0;">'
-    f'🔩 Metal AI Trading System v3.3 · 14因子智能推荐 · {real_label}'
+    f'🔩 Metal AI Trading System v3.4 · 14因子统计增强 · {real_label}'
     '</div>',
     unsafe_allow_html=True,
 )

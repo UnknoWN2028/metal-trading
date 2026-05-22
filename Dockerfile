@@ -1,4 +1,4 @@
-# ── 有色金属回收AI系统 v3 Dockerfile ──
+# ── 有色金属回收AI系统 v3.4 Dockerfile ──
 FROM python:3.11-slim
 
 WORKDIR /app
