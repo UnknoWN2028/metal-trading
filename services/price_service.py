@@ -79,7 +79,6 @@ class MetalPriceService:
         if self._use_real:
             df = self._get_real_history_df(metal_type, days, cfg)
             if df is not None and not df.empty:
-                # 防御：确保price列是1D数值
                 try:
                     prices_check = df['price'].values
                     if prices_check.ndim > 1:
@@ -90,14 +89,25 @@ class MetalPriceService:
                 self._history_cache[cache_key] = result
                 return result
 
-        # === 模拟模式：随机游走 ===
+            # 🆕 v3.4: 真实模式但无历史K线 → 尝试同步拉取
+            if self._use_real and metal_type in self._real_prices:
+                fetched = self._try_fetch_history_sync(metal_type, cfg)
+                if fetched is not None and not fetched.empty:
+                    result = (fetched, "SHFE实时")
+                    self._history_cache[cache_key] = result
+                    return result
+
+        # === 模拟模式：多状态价格生成（趋势+震荡+均值回归混合） ===
         base = cfg.get("base_price", 50000)
         vol = cfg.get("volatility", 0.01)
         seed = self._get_seed(metal_type)
         rng = np.random.RandomState(seed)
         dates = pd.date_range(end=datetime.now(), periods=days, freq='D')
-        returns = rng.normal(0.0001, vol, days)
-        prices = base * np.exp(np.cumsum(returns))
+
+        # 🆕 v3.4: 三态Markov价格模型（趋势/震荡/均值回归）
+        prices = self._generate_realistic_prices(
+            base, vol, days, rng, metal_type, dates
+        )
 
         # 真实模式有现货价 → 布朗桥锚定
         source = "模拟"
@@ -518,6 +528,36 @@ class MetalPriceService:
                 return df
         return None
 
+    def _try_fetch_history_sync(self, metal_type: str, cfg: dict, max_days: int = 180) -> pd.DataFrame:
+        """🆕 v3.4 同步拉取单个金属的历史K线（5秒超时）
+        当真实模式已启用但历史K线尚未后台拉取完成时，按需同步获取。
+        """
+        import threading
+        result_container = {}
+
+        def _fetch():
+            try:
+                import akshare as ak
+                code = cfg.get('futures_code')
+                if not code or cfg.get('is_scrap'):
+                    return
+                kline = ak.futures_main_sina(symbol=code)
+                if kline is not None and not kline.empty:
+                    clean = self._normalize_kline(kline, metal_type)
+                    if clean is not None and not clean.empty:
+                        self._real_history[metal_type] = clean
+                        cutoff = datetime.now() - timedelta(days=max_days)
+                        sliced = clean[clean['date'] >= cutoff]
+                        if len(sliced) >= 10:
+                            result_container['df'] = sliced
+            except Exception as e:
+                logger.debug(f"同步K线[{metal_type}]: {e}")
+
+        t = threading.Thread(target=_fetch, daemon=True)
+        t.start()
+        t.join(timeout=5)
+        return result_container.get('df')
+
     @staticmethod
     def _normalize_kline(raw_df: pd.DataFrame, metal_type: str,
                          time_col_name: str = None) -> pd.DataFrame:
@@ -571,7 +611,72 @@ class MetalPriceService:
         except Exception:
             return None
 
-    def _current_price(self, metal: str, cfg: dict) -> dict:
+    def _generate_realistic_prices(self, base: float, vol: float, days: int,
+                                   rng: np.random.RandomState, metal: str,
+                                   dates) -> np.ndarray:
+        """🆕 v3.4 三态Markov价格模型：趋势/震荡/均值回归混合
+        
+        每种金属根据seed分配到不同市场状态，产生真实的分化推荐。
+        """
+        # 用seed的hash将金属分配到不同场景（4种场景，各有不同比例）
+        metal_hash = abs(hash(metal)) % 100
+
+        # 分配市场状态权重 [trending_up, trending_down, ranging, mean_reverting]
+        if metal_hash < 25:
+            # 场景A: 偏多头（铜、铝类）
+            state_probs = [0.45, 0.10, 0.25, 0.20]
+        elif metal_hash < 50:
+            # 场景B: 偏空头
+            state_probs = [0.10, 0.40, 0.30, 0.20]
+        elif metal_hash < 75:
+            # 场景C: 宽幅震荡
+            state_probs = [0.15, 0.15, 0.50, 0.20]
+        else:
+            # 场景D: 均值回归型（黄金白银类）
+            state_probs = [0.20, 0.15, 0.25, 0.40]
+
+        # 预生成状态序列（每10天切换一次状态，但有延续性）
+        n_segments = max(days // 8, 1)
+        states = rng.choice(4, size=n_segments, p=state_probs)
+
+        # 按状态生成价格
+        prices = np.zeros(days)
+        prices[0] = base
+        seg_len = days // n_segments
+
+        for seg in range(n_segments):
+            start = seg * seg_len
+            end = min((seg + 1) * seg_len, days)
+            state = states[seg]
+
+            for i in range(start, end):
+                if i == 0:
+                    continue
+                noise = rng.normal(0, vol)
+
+                if state == 0:  # trending_up
+                    drift = vol * 0.6
+                    ar = 0.3 * (prices[i-1] - prices[max(0, i-2)]) if i >= 2 else 0
+                    prices[i] = prices[i-1] * (1 + drift + noise + ar)
+                elif state == 1:  # trending_down
+                    drift = -vol * 0.5
+                    ar = 0.25 * (prices[i-1] - prices[max(0, i-2)]) if i >= 2 else 0
+                    prices[i] = prices[i-1] * (1 + drift + noise + ar)
+                elif state == 2:  # ranging
+                    prices[i] = prices[i-1] * (1 + noise * 0.7)
+                else:  # mean_reverting
+                    # 均值回归：向MA20回归
+                    lookback = min(i, 20)
+                    if lookback > 0:
+                        ma = np.mean(prices[max(0, i-lookback):i])
+                        revert = 0.02 * (ma - prices[i-1]) / prices[i-1]
+                    else:
+                        revert = 0
+                    prices[i] = prices[i-1] * (1 + revert + noise)
+
+        # 确保价格为正数
+        prices = np.maximum(prices, base * 0.5)
+        return prices
         if self._use_real and metal in self._real_prices:
             info = self._real_prices[metal]
             return {
