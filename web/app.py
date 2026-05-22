@@ -473,6 +473,24 @@ if page == "📊 仪表盘":
     else:
         empty_state("暂无快讯数据", "📰")
 
+    # 🆕 v3.4 诊断面板（定位全"观望"根因）
+    with st.expander("🔧 引擎诊断", expanded=False):
+        st.caption("数据源检查 & 指标抽样")
+        try:
+            from config import METAL_TYPES
+            for mt in list(METAL_TYPES.keys())[:4]:
+                df, src = services["price"].get_historical_prices(mt, 120)
+                ind = services["recommendation"]._compute_indicators(df['price'].values)
+                st.markdown(
+                    f"**{mt}** | 数据源:`{src}` | 数据点:`{ind['n']}` | "
+                    f"RSI:`{ind['rsi']:.1f}` | MACD:`{ind['macd']:.4f}` | "
+                    f"Hurst:`{ind.get('hurst',0.5):.2f}` | "
+                    f"%B:`{ind.get('bb_pct_b',0.5):.2f}` | "
+                    f"ADX:`{ind.get('adx',15):.0f}`"
+                )
+        except Exception as e:
+            st.error(f"诊断异常: {e}")
+
 
 # ═══════════════════════════════════════════════════════════
 #  💰 实时行情
