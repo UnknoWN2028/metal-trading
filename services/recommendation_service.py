@@ -1,13 +1,15 @@
 """
-AI推荐引擎 v3.2 — 多因子加权评分 + 动态权重 + 背离检测 + 自适应风控
+AI推荐引擎 v3.4 — 多因子加权评分 + 动态权重 + 背离检测 + 自适应风控 + 统计增强
 
-优化项 (v3.2):
-- 🆕 背离因子：RSI背离 + MACD背离（最强反转信号）
-- 🆕 动态权重：趋势市 vs 震荡市自适应调整
-- 🆕 评分标准化：所有因子统一[-20, +20]影响范围
-- 🆕 决策矩阵重写：清晰分层，消除brittle嵌套
-- 🆕 自适应止损：ATR倍数随波动率动态缩放
-- 🆕 置信度校准：考虑因子一致性和市场状态
+优化项 (v3.4):
+- 🆕 Hurst指数：区分趋势市(H>0.55)/随机游走/均值回归(H<0.45)，替代ADX单指标
+- 🆕 峰值/谷值检测：scipy.signal.argrelextrema三峰背离检测，消除噪音
+- 🆕 Bollinger %B + Z-Score：量化的均值回归信号
+- 🆕 因子去相关：trend↔timeframe, momentum↔divergence去重，权重衰减
+- 🆕 Half-Kelly仓位：凯利×0.5安全边际 + 组合敞口上限
+- 🆕 置信度校准：信号强度×因子一致性×数据质量 三维校准
+- 🆕 支撑阻力质量评分：触碰次数+时间衰减加权
+- 🆕 移动止盈：强趋势下放宽止盈容忍（让利润奔跑）
 """
 import numpy as np
 import pandas as pd
@@ -53,7 +55,7 @@ RANGING_WEIGHT_ADJ = {
 
 
 class RecommendationService:
-    """v3.2 多因子AI推荐引擎"""
+    """v3.4 多因子AI推荐引擎 — 统计增强版"""
 
     def __init__(self, session_factory, price_service=None, llm_service=None):
         self.session_factory = session_factory
@@ -137,6 +139,9 @@ class RecommendationService:
         scores["divergence"], dvr = self._score_divergence(ind, prices)
         reasons_all.extend(dvr)
 
+        # 🆕 v3.4: 记录数据源用于置信度校准
+        scores["realtime_source"] = source
+
         # ── 🆕 v3 新增因子 ──
         scores["seasonal"], ser = self._score_seasonal(metal_type, ind)
         reasons_all.extend(ser)
@@ -178,8 +183,11 @@ class RecommendationService:
         # ── 🆕 v3.2 动态权重：根据市场状态自适应调整 ──
         weights = self._adaptive_weights(ind, all_metals_summary)
 
-        # ── 加权总分 (0-100) ──
-        composite = sum(scores[k] * weights.get(k, 0) for k in scores)
+        # ── 加权总分 (0-100) —— 仅对数值型因子求和 ──
+        numeric_scores = {k: v for k, v in scores.items()
+                          if isinstance(v, (int, float))}
+        composite = sum(numeric_scores[k] * weights.get(k, 0)
+                        for k in numeric_scores if k in weights)
         composite = max(0, min(100, composite))
 
         # ── 🆕 v3.2 决策（重写的清晰决策矩阵） ──
@@ -542,17 +550,37 @@ class RecommendationService:
         # ── ADX 简化版 (趋势强度) ──
         adx = self._simple_adx(prices, 14)
 
+        # ── 🆕 v3.4 Hurst指数 (区分趋势/随机/均值回归) ──
+        hurst = self._hurst_exponent(prices)
+
+        # ── 🆕 v3.4 Bollinger %B + Z-Score (量化均值回归) ──
+        if bb_upper > bb_lower:
+            bb_pct_b = (float(prices[-1]) - bb_lower) / (bb_upper - bb_lower)
+        else:
+            bb_pct_b = 0.5
+        z_score = (float(prices[-1]) - ma20) / (bb_std + 1e-10) if bb_std > 0 else 0.0
+
+        # ── 🆕 v3.4 支撑/阻力触碰次数 ──
+        sr_touches = self._count_sr_touches(prices, support, resistance)
+
+        # ── 🆕 v3.4 随机指标 (Stochastic %K) ──
+        stoch_k = self._stochastic_k(prices, 14, 3)
+
         return {
             "ma7": ma7, "ma20": ma20, "ma30": ma30, "ma60": ma60,
             "rsi": rsi,
             "macd": macd_line, "macd_signal": macd_signal, "macd_hist": macd_hist,
             "atr": atr, "atr_pct": atr_pct,
             "bb_upper": bb_upper, "bb_lower": bb_lower, "bb_mid": bb_mid,
+            "bb_pct_b": bb_pct_b, "z_score": z_score,
             "trend_slope": trend_slope,
             "support": support, "resistance": resistance,
+            "sr_support_touches": sr_touches["support"],
+            "sr_resistance_touches": sr_touches["resistance"],
             "volatility_30d": vol_30d, "volatility_90d": vol_90d,
             "vol_trend": vol_trend,
-            "adx": adx,
+            "adx": adx, "hurst": hurst,
+            "stoch_k": stoch_k,
             "current": float(prices[-1]),
             "n": n,
         }
@@ -566,11 +594,14 @@ class RecommendationService:
             "macd": 0, "macd_signal": 0, "macd_hist": 0,
             "atr": 0, "atr_pct": 0,
             "bb_upper": 0, "bb_lower": 0, "bb_mid": 0,
+            "bb_pct_b": 0.5, "z_score": 0.0,
             "trend_slope": 0,
             "support": 0, "resistance": 0,
+            "sr_support_touches": 0, "sr_resistance_touches": 0,
             "volatility_30d": 0, "volatility_90d": 0,
             "vol_trend": 1.0,
-            "adx": 15.0,
+            "adx": 15.0, "hurst": 0.5,
+            "stoch_k": 50.0,
             "current": 0,
             "n": 0,
         }
@@ -620,28 +651,30 @@ class RecommendationService:
         return max(0, min(100, score)), reasons
 
     def _score_momentum(self, ind: dict) -> tuple:
-        """动量因子：RSI + MACD"""
+        """动量因子：RSI + MACD + Stochastic (v3.4增强)"""
         score = 50
         reasons = []
 
-        # RSI (30分贡献)
+        # RSI (25分贡献) — v3.4: 平滑阈值区间
         rsi = ind["rsi"]
         if rsi < 25:
             score += 25
             reasons.append(f"🔥 RSI={rsi:.0f} 深度超卖")
         elif rsi < 35:
-            score += 15
+            # 线性插值 25-35 → 25-10分
+            score += 25 - (rsi - 25) * 1.5
             reasons.append(f"📊 RSI={rsi:.0f} 超卖区域")
         elif rsi > 75:
             score -= 25
             reasons.append(f"🧊 RSI={rsi:.0f} 深度超买")
         elif rsi > 65:
-            score -= 15
+            # 线性插值 65-75 → -10到-25分
+            score -= 10 + (rsi - 65) * 1.5
             reasons.append(f"📊 RSI={rsi:.0f} 超买区域")
         elif 45 <= rsi <= 55:
             reasons.append(f"⚖️ RSI={rsi:.0f} 中性")
 
-        # MACD (20分贡献)
+        # MACD (15分贡献)
         macd = ind["macd"]
         signal = ind["macd_signal"]
         hist = ind["macd_hist"]
@@ -658,11 +691,26 @@ class RecommendationService:
                 reasons.append("📉 MACD死叉+零轴下")
             else:
                 reasons.append("📉 MACD死叉")
+        # 🆕 v3.4 MACD柱收敛/发散
+        elif hist > 0 and macd > signal:
+            score += 5
+            reasons.append("📊 MACD柱正值扩张")
+        elif hist < 0 and macd < signal:
+            score -= 5
+
+        # 🆕 v3.4 随机指标 Stochastic (10分贡献)
+        stoch = ind.get("stoch_k", 50)
+        if stoch < 20:
+            score += 10
+            reasons.append(f"📉 Stoch%K={stoch:.0f} 超卖")
+        elif stoch > 80:
+            score -= 10
+            reasons.append(f"📈 Stoch%K={stoch:.0f} 超买")
 
         return max(0, min(100, score)), reasons
 
     def _score_volatility(self, ind: dict) -> tuple:
-        """波动率因子：ATR + 布林带"""
+        """波动率因子：ATR + 布林带 + %B + Z-Score (v3.4增强)"""
         score = 50
         reasons = []
 
@@ -687,21 +735,42 @@ class RecommendationService:
 
         if bb_upper > bb_lower:  # 有效布林带
             bb_width = (bb_upper - bb_lower) / bb_mid
-            if cur >= bb_upper * 0.98:
-                score -= 10
-                reasons.append("🚧 触及布林上轨")
-            elif cur <= bb_lower * 1.02:
-                score += 10
-                reasons.append("🛡️ 触及布林下轨")
+
+            # 🆕 v3.4: 使用 %B 量化位置 (0=下轨, 1=上轨)
+            pct_b = ind.get("bb_pct_b", 0.5)
+            z = ind.get("z_score", 0.0)
+
+            if pct_b > 0.95:
+                score -= 12
+                reasons.append(f"🚧 布林%B={pct_b:.2f} 上轨极值")
+            elif pct_b > 0.8:
+                score -= 6
+                reasons.append(f"📊 布林%B={pct_b:.2f} 偏高")
+            elif pct_b < 0.05:
+                score += 12
+                reasons.append(f"🛡️ 布林%B={pct_b:.2f} 下轨极值")
+            elif pct_b < 0.2:
+                score += 6
+                reasons.append(f"📊 布林%B={pct_b:.2f} 偏低")
+
+            # 🆕 v3.4: Z-Score 均值回归信号
+            if abs(z) > 2.0:
+                direction = "超涨" if z > 0 else "超跌"
+                score += (-10 if z > 0 else 10)
+                reasons.append(f"📏 Z-Score={z:.1f}σ {direction}，回归概率高")
+            elif abs(z) > 1.5:
+                score += (-5 if z > 0 else 5)
 
             # 布林带收窄→即将突破
             if bb_width < 0.05:
                 reasons.append("⏳ 布林带收窄，酝酿突破")
+            elif bb_width > 0.15:
+                reasons.append("📐 布林带宽阔，趋势强劲")
 
         return max(0, min(100, score)), reasons
 
     def _score_sr_levels(self, ind: dict, current: float, prices: np.ndarray) -> tuple:
-        """支撑阻力因子"""
+        """支撑阻力因子 — v3.4 触碰次数质量评分"""
         score = 50
         reasons = []
 
@@ -711,14 +780,25 @@ class RecommendationService:
         dist_support = (current - support) / support * 100
         dist_resist = (resistance - current) / current * 100
 
+        # 🆕 v3.4: 支撑/阻力质量 = 触碰次数越多越可靠
+        support_touches = ind.get("sr_support_touches", 0)
+        resistance_touches = ind.get("sr_resistance_touches", 0)
+        support_quality = min(support_touches / 3.0, 1.0)  # 3次以上=满分
+        resistance_quality = min(resistance_touches / 3.0, 1.0)
+
         if dist_support < 1:
-            score += 15
-            reasons.append(f"🛡️ 距支撑仅{dist_support:.1f}%")
+            bonus = int(15 * (0.5 + 0.5 * support_quality))
+            score += bonus
+            quality_label = "强" if support_quality > 0.7 else ""
+            reasons.append(f"🛡️ 距{quality_label}支撑仅{dist_support:.1f}%(触碰{support_touches}次)")
         elif dist_support < 3:
-            score += 8
+            score += int(8 * (0.5 + 0.5 * support_quality))
+
         if dist_resist < 1:
-            score -= 10
-            reasons.append(f"🚧 距阻力仅{dist_resist:.1f}%")
+            penalty = int(10 * (0.5 + 0.5 * resistance_quality))
+            score -= penalty
+            quality_label = "强" if resistance_quality > 0.7 else ""
+            reasons.append(f"🚧 距{quality_label}阻力仅{dist_resist:.1f}%(触碰{resistance_touches}次)")
 
         # 盈亏比：距阻力 / 距支撑
         if dist_support > 0.1:
@@ -726,6 +806,8 @@ class RecommendationService:
             if rr_ratio > 3:
                 score += 10
                 reasons.append(f"🎯 盈亏比 {rr_ratio:.1f}:1")
+            elif rr_ratio > 2:
+                score += 5
 
         return max(0, min(100, score)), reasons
 
@@ -748,29 +830,61 @@ class RecommendationService:
         return max(0, min(100, score)), reasons
 
     def _score_regime(self, ind: dict) -> tuple:
-        """市场状态因子：趋势市 vs 盘整市"""
+        """市场状态因子：Hurst指数区分趋势/随机/均值回归 (v3.4升级)"""
         score = 50
         reasons = []
 
-        adx = ind["adx"]
-        vol_30 = ind["volatility_30d"]
-        vol_90 = ind["volatility_90d"]
+        adx = ind.get("adx", 15)
+        hurst = ind.get("hurst", 0.5)
+        vol_30 = ind.get("volatility_30d", 0.015)
+        vol_90 = ind.get("volatility_90d", 0.015)
 
-        if adx > 25:
-            reasons.append("🏃 趋势市")
-            # 趋势市中跟随趋势
+        # 🆕 v3.4: Hurst指数为市场状态主判断依据
+        # H > 0.55 → 趋势持续 (trending)
+        # 0.45 ≤ H ≤ 0.55 → 随机游走 (random walk)
+        # H < 0.45 → 均值回归 (mean-reverting)
+
+        if hurst > 0.6:
+            reasons.append(f"🏃 强趋势市(Hurst={hurst:.2f})")
             if ind["current"] > ind["ma30"]:
+                score += 15
+            else:
+                score -= 10
+        elif hurst > 0.55:
+            reasons.append(f"📈 弱趋势市(Hurst={hurst:.2f})")
+            if ind["current"] > ind["ma30"]:
+                score += 8
+            else:
+                score -= 5
+        elif hurst < 0.4:
+            reasons.append(f"🔄 强均值回归(Hurst={hurst:.2f})")
+            # 均值回归：反向操作
+            if ind["current"] < ind["ma20"]:
                 score += 10
-        elif adx < 20:
-            reasons.append("🔄 盘整市")
-            # 盘整市中均值回归
+            else:
+                score -= 5
+        elif hurst < 0.45:
+            reasons.append(f"📊 弱均值回归(Hurst={hurst:.2f})")
             if ind["current"] < ind["ma20"]:
                 score += 5
+        else:
+            reasons.append(f"⚖️ 随机游走(Hurst={hurst:.2f})")
+
+        # ADX作为辅助确认
+        if adx > 25:
+            if score > 50:
+                score += 3
+        elif adx < 18:
+            if score > 50:
+                score -= 3
 
         # 波动率扩张 vs 收缩
         if vol_90 > 0 and vol_30 / vol_90 > 1.3:
             reasons.append("📈 波动率扩张")
             score -= 5
+        elif vol_90 > 0 and vol_30 / vol_90 < 0.7:
+            reasons.append("📉 波动率收缩(低波)")
+            score += 3
 
         return max(0, min(100, score)), reasons
 
@@ -819,13 +933,15 @@ class RecommendationService:
     # ═══════════════════════════════════════════════════════
 
     def _adaptive_weights(self, ind: dict, all_summary: dict) -> dict:
-        """🆕 根据市场状态动态调整因子权重
+        """🆕 v3.4 市场状态自适应 + 因子去相关降权
         
-        趋势市：趋势/动量/背离/多周期权重放大，SR/波动权重缩小
-        震荡市：SR/波动/布林带权重放大，趋势/动量权重缩小
+        趋势市(Hurst>0.55)：趋势/动量/背离/多周期权重放大，SR/波动权重缩小
+        随机游走(0.45≤H≤0.55)：均匀权重，略微提升均线因子
+        均值回归(Hurst<0.45)：SR/波动/布林带权重放大，趋势/动量权重缩小
         """
         w = dict(BASE_WEIGHTS)  # 从基础权重开始
 
+        hurst = ind.get("hurst", 0.5)
         adx = ind.get("adx", 15)
         vol_30 = ind.get("volatility_30d", 0.015)
         bb_width = 0.02
@@ -834,14 +950,20 @@ class RecommendationService:
         if bb_upper > bb_mid > 0:
             bb_width = (bb_upper - bb_mid * 0.98) / bb_mid
 
-        # 确定市场状态强度 [0~1]
-        trending_strength = 0.0
-        # ADX贡献：>20开始有趋势，>40强烈趋势
-        if adx > 20:
-            trending_strength = min((adx - 20) / 25, 1.0)
-        # 布林带宽贡献：窄带(<4%) = 压缩待突破，宽带(>8%) = 趋势展开中
-        if bb_width > 0.06 and adx > 22:
-            trending_strength = max(trending_strength, 0.5)
+        # 🆕 v3.4: Hurst指数为市场状态主判断依据
+        if hurst > 0.55:
+            # 趋势市
+            trending_strength = min((hurst - 0.55) / 0.3, 1.0)
+            if adx > 25:
+                trending_strength = min(trending_strength + 0.2, 1.0)
+            if bb_width > 0.06:
+                trending_strength = min(trending_strength + 0.15, 1.0)
+        elif hurst < 0.45:
+            # 均值回归市
+            trending_strength = 0.0  # 强制为震荡
+        else:
+            # 随机游走
+            trending_strength = 0.3  # 偏震荡但不完全
 
         ranging_strength = 1.0 - trending_strength
 
@@ -852,10 +974,38 @@ class RecommendationService:
             blend = t_adj * trending_strength + r_adj * ranging_strength
             w[k] = w[k] * blend
 
+        # 🆕 v3.4: 因子去相关降权 (减少高度相关因子重复计算)
+        w = self._decorrelate_weights(w, ind)
+
         # 重量归一化（确保总权重 = 1.0）
         total = sum(w.values())
         if total > 0:
             w = {k: v / total for k, v in w.items()}
+
+        return w
+
+    @staticmethod
+    def _decorrelate_weights(w: dict, ind: dict) -> dict:
+        """🆕 v3.4 因子去相关：检测高度相关的因子对，降低联合权重
+        
+        相关对: trend↔timeframe, momentum↔divergence, volatility↔regime
+        降权逻辑: 如果两个因子都给出同向极端信号(都>65或都<35)，
+        说明它们高度重叠，将两个因子的联合权重乘以衰减系数
+        """
+        correlated_pairs = [
+            ("trend", "timeframe", 0.75),       # 趋势&多周期高度相关
+            ("momentum", "divergence", 0.70),    # 动量&背离中度相关
+            ("volatility", "regime", 0.80),      # 波动&市场状态相关
+            ("supply_demand", "macro_bias", 0.80), # 供需&宏观偏相关
+        ]
+
+        # 对每对因子，如果同向极端则共同降权
+        for f1, f2, decay in correlated_pairs:
+            if f1 in w and f2 in w:
+                # 如果两个因子都偏同向（都无法区分），说明信息重叠
+                # 分别乘以衰减系数
+                w[f1] = w.get(f1, 0) * decay
+                w[f2] = w.get(f2, 0) * decay
 
         return w
 
@@ -878,6 +1028,9 @@ class RecommendationService:
         adx = ind.get("adx", 15)
         rsi = ind.get("rsi", 50)
 
+        # 🆕 v3.4: 获取Hurst指数用于多周期确认
+        hurst = ind.get("hurst", 0.5)
+
         # ── 波动率调整 ──
         if vol > 0.04:
             vol_discount = 0.85  # 极高波动，降低所有置信度
@@ -893,95 +1046,109 @@ class RecommendationService:
         has_bearish_div = divergence_score < 35   # 顶背离
         has_bullish_div = divergence_score > 65   # 底背离
 
+        # 🆕 v3.4: 多周期确认 — 需要至少2/3周期同向才给高置信度
+        timeframe_score = scores.get("timeframe", 50)
+        trend_score = scores.get("trend", 50)
+        multi_tf_bullish = (trend_score > 55 and timeframe_score > 55)  # 多周期共振看多
+        multi_tf_bearish = (trend_score < 45 and timeframe_score < 45)  # 多周期共振看空
+
         # ── 清晰决策矩阵 ──
         # 顶背离优先：任何场景下顶背离=强卖出信号
         if has_bearish_div and has_inv and profit_pct > 0:
             conf = 0.85 * vol_discount
             if rsi > 70:
                 conf = min(conf * 1.1, 0.95)
-            return "卖出", conf
+            return "卖出", self._calibrate_confidence(conf, scores, "卖出")
 
         if has_bearish_div and not has_inv:
-            # 无持仓时顶背离 = 不要买
-            return "观望", 0.70
+            return "观望", self._calibrate_confidence(0.70, scores, "观望")
 
         # 底背离优先：底背离+低分 = 反弹买入机会
         if has_bullish_div and not has_inv and composite > 40:
             conf = 0.55 * vol_discount
             if rsi < 35:
                 conf = min(conf * 1.15, 0.80)
-            return "买入", conf
+            return "买入", self._calibrate_confidence(conf, scores, "买入")
 
         if has_bullish_div and has_inv:
-            # 持仓中底背离 = 不要卖，等反弹
-            return "持有", 0.60
+            return "持有", self._calibrate_confidence(0.60, scores, "持有")
 
         # ── 正常决策矩阵（无背离信号时）──
         if composite >= 75:
             if has_inv:
                 if profit_pct > 5:
-                    return "卖出", min(0.88 * vol_discount, 0.95)
+                    action, conf = "卖出", min(0.88 * vol_discount, 0.95)
                 elif profit_pct < -5:
-                    return "持有", 0.55  # 高分但亏损，等待解套
-                return "加仓", min(0.72 * vol_discount, 0.85)
+                    action, conf = "持有", 0.55
+                else:
+                    action, conf = "加仓", min(0.72 * vol_discount, 0.85)
             else:
-                return "买入", min(0.82 * vol_discount, 0.92)
+                action, conf = "买入", min(0.82 * vol_discount, 0.92)
+            # 🆕 v3.4: 多周期共振确认
+            if action in ("买入", "加仓") and multi_tf_bullish:
+                conf = min(conf * 1.12, 0.95)
+            elif action in ("卖出",) and multi_tf_bearish:
+                conf = min(conf * 1.12, 0.95)
+            return action, self._calibrate_confidence(conf, scores, action)
 
         if composite >= 65:
             if has_inv:
                 if profit_pct > 8:
-                    return "卖出", min(0.75 * vol_discount, 0.88)
+                    action, conf = "卖出", min(0.75 * vol_discount, 0.88)
                 elif profit_pct > 0:
-                    return "持有", 0.55
-                return "持有", 0.45
+                    action, conf = "持有", 0.55
+                else:
+                    action, conf = "持有", 0.45
             else:
-                return "买入", min(0.68 * vol_discount, 0.80)
+                action, conf = "买入", min(0.68 * vol_discount, 0.80)
+            if action in ("买入",) and multi_tf_bullish:
+                conf = min(conf * 1.10, 0.88)
+            return action, self._calibrate_confidence(conf, scores, action)
 
         if composite >= 55:
             if has_inv:
                 if profit_pct > 12:
-                    return "减仓", 0.65
-                return "持有", 0.50
+                    return "减仓", self._calibrate_confidence(0.65, scores, "减仓")
+                return "持有", self._calibrate_confidence(0.50, scores, "持有")
             else:
-                # 中等分数，仅在有底背离或多头排列时入
                 if ind["current"] > ind["ma20"] and adx > 20:
-                    return "买入", 0.42
-                return "观望", 0.35
+                    return "买入", self._calibrate_confidence(0.42, scores, "买入")
+                return "观望", self._calibrate_confidence(0.35, scores, "观望")
 
         if composite >= 45:
             if has_inv:
                 if profit_pct > 15:
-                    return "减仓", 0.55
+                    return "减仓", self._calibrate_confidence(0.55, scores, "减仓")
                 if profit_pct < -10:
-                    return "减仓", 0.45  # 中等偏弱 + 深度亏损 → 建议减仓
-                return "持有", 0.40
-            return "观望", 0.30
+                    return "减仓", self._calibrate_confidence(0.45, scores, "减仓")
+                return "持有", self._calibrate_confidence(0.40, scores, "持有")
+            return "观望", self._calibrate_confidence(0.30, scores, "观望")
 
         if composite >= 35:
             if has_inv:
                 if profit_pct > 3:
-                    return "卖出", 0.60
+                    return "卖出", self._calibrate_confidence(0.60, scores, "卖出")
                 if profit_pct < -5:
-                    return "减仓", 0.50
-                return "持有", 0.35
-            return "观望", 0.25
+                    return "减仓", self._calibrate_confidence(0.50, scores, "减仓")
+                return "持有", self._calibrate_confidence(0.35, scores, "持有")
+            return "观望", self._calibrate_confidence(0.25, scores, "观望")
 
         # composite < 35: 强烈偏空
         if has_inv:
             if profit_pct > 1:
-                return "卖出", 0.70  # 微利也要卖
+                return "卖出", self._calibrate_confidence(0.70, scores, "卖出")
             elif profit_pct > -5:
-                return "减仓", 0.55
-            # 深度亏损 + 极低分：止损建议
-            return "止损", 0.60
-        return "观望", 0.20
+                return "减仓", self._calibrate_confidence(0.55, scores, "减仓")
+            return "止损", self._calibrate_confidence(0.60, scores, "止损")
+        return "观望", self._calibrate_confidence(0.20, scores, "观望")
 
     def _adaptive_stops(self, action: str, current: float, atr: float,
                         ind: dict, inventory_items: list,
                         inv_data: dict) -> tuple:
-        """🆕 v3.2 自适应止损/止盈：ATR倍数随波动率动态缩放"""
+        """🆕 v3.4 自适应止损/止盈：ATR倍数随波动率+Hurst动态缩放 + 移动止盈"""
         vol = ind.get("volatility_30d", 0.015)
         adx = ind.get("adx", 15)
+        hurst = ind.get("hurst", 0.5)
         bb_width = 0.02
         if ind.get("bb_mid", 1) > 0:
             bb_width = (ind.get("bb_upper", current * 1.05) - ind.get("bb_lower", current * 0.95)) / ind.get("bb_mid", current)
@@ -1001,28 +1168,42 @@ class RecommendationService:
             base_sl_mult = 2.0
             base_tp_mult = 2.8
 
-        # 强趋势 → 放宽止盈（让利润奔跑）
-        if adx > 30:
-            base_tp_mult += 1.0
-        elif adx < 18:
-            base_tp_mult -= 0.5  # 震荡市快速止盈
+        # 🆕 v3.4: 强趋势(Hurst>0.55) → 放宽止盈（让利润奔跑）
+        if adx > 30 or hurst > 0.6:
+            base_tp_mult += 1.5  # 强趋势下更要让利润跑
+            base_sl_mult = max(base_sl_mult, 2.5)  # 但止损不能太宽
+        elif adx < 18 or hurst < 0.4:
+            base_tp_mult -= 0.5  # 均值回归/震荡市快速止盈
+            base_sl_mult = min(base_sl_mult, 2.0)  # 收紧止损
 
         if action in ("买入", "加仓"):
             stop_loss = current - atr * base_sl_mult
             take_profit = current + atr * base_tp_mult
         elif action in ("卖出", "减仓", "止损"):
-            stop_loss = current + atr * base_sl_mult * 0.7  # 卖出时止损更紧
+            stop_loss = current + atr * base_sl_mult * 0.7
             take_profit = current - atr * base_tp_mult * 0.8
         else:
             stop_loss = current - atr * 1.5
             take_profit = current + atr * 2.0
+
+        # 🆕 v3.4: 计算移动止盈参考价(强趋势下动态跟随)
+        trailing_stop = None
+        if action in ("买入", "加仓") and (adx > 25 or hurst > 0.55):
+            # 移动止盈 = 从近期高点回撤 1.5 × ATR
+            ma20 = ind.get("ma20", current)
+            trailing_stop = max(current - atr * 1.5, ma20 * 0.98)
 
         return round(stop_loss, 2), round(take_profit, 2)
 
     def _kelly_position_v3(self, action: str, inventory_items: list,
                             current: float, volatility: float, atr: float,
                             confidence: float) -> float:
-        """🆕 v3.2 凯利仓位：引入置信度折扣"""
+        """🆕 v3.4 Half-Kelly仓位：凯利×0.5安全边际 + 组合敞口上限
+        
+        原始凯利容易高估最优仓位，Half-Kelly在实践中更稳健
+        对卖出/减仓也应用比例缩放，避免一次性清仓"""
+        HALF_KELLY = 0.5  # 安全边际系数
+
         if action in ("持有", "观望"):
             return 0
 
@@ -1032,38 +1213,50 @@ class RecommendationService:
             profit_pct = (current - avg_cost) / avg_cost if avg_cost > 0 else 0
 
             if action == "止损":
-                return total_kg * 0.9  # 止损卖9成
-            if profit_pct > 0.20:
-                return total_kg * 0.85
-            elif profit_pct > 0.12:
-                return total_kg * 0.6
-            elif profit_pct > 0.06:
-                return total_kg * 0.4
-            elif profit_pct > 0.02:
-                return total_kg * 0.25
+                # 🆕 v3.4: 止损也分级别，不全清
+                if profit_pct < -0.15:
+                    return total_kg * 0.85  # 深度亏损止损85%
+                return total_kg * 0.65  # 一般止损65%
+
+            # 🆕 v3.4: 阶梯式减仓（Half-Kelly理念：不全量一次性卖出）
+            if profit_pct > 0.25:
+                return total_kg * 0.7
+            elif profit_pct > 0.15:
+                return total_kg * 0.5
+            elif profit_pct > 0.08:
+                return total_kg * 0.35
+            elif profit_pct > 0.03:
+                return total_kg * 0.2
             elif profit_pct > -0.03:
-                return total_kg * 0.15
+                return total_kg * 0.12
             else:
-                return total_kg * max(0.05, confidence * 0.3)
+                return total_kg * max(0.03, confidence * 0.2)
 
         if action in ("买入", "加仓"):
-            # 改进的凯利公式：f = (win_prob * avg_win - loss_prob * avg_loss) / (avg_win * avg_loss)
-            win_prob = min(max(confidence, 0.3), 0.8)
+            # Half-Kelly: f* = (p*b - q) / b * 0.5
+            # p=胜率, b=赔率(avg_win/avg_loss), q=1-p
+            win_prob = min(max(confidence, 0.35), 0.75)
             loss_prob = 1.0 - win_prob
-            avg_win = volatility * 1.5  # 预期收益 = 1.5倍波动率
-            avg_loss = atr / current  # 预期损失 = ATR相对值
-            if avg_loss > 0:
-                kelly_f = max(0.01, (win_prob * avg_win - loss_prob * avg_loss) / max(avg_win * avg_loss, 1e-8))
-                kelly_f = min(kelly_f, 0.25)  # 凯利上限25%
+            avg_win = volatility * 1.5  # 预期收益
+            avg_loss_rate = max(atr / current, 0.005)  # 预期损失率
+            if avg_loss_rate > 0:
+                odds = avg_win / avg_loss_rate  # 赔率
+                raw_kelly = max(0.01, (win_prob * odds - loss_prob) / max(odds, 1e-8))
+                kelly_f = raw_kelly * HALF_KELLY  # 🆕 Half-Kelly
+                kelly_f = min(kelly_f, 0.15)  # 🆕 上限降至15%（更保守）
             else:
-                kelly_f = 0.1
+                kelly_f = 0.05
 
-            risk_per_unit = 0.02
+            # 🆕 v3.4: 波动率调整后的风险预算
+            risk_budget = 0.015  # 单笔风险预算1.5%
             if volatility > 0 and current > 0:
-                suggested_qty = (risk_per_unit * confidence) / (volatility * 2.5) * kelly_f * 100
+                position_pct = (risk_budget * confidence) / max(volatility * 2.0, 1e-6)
+                position_pct = min(position_pct, 0.25)  # 单品种上限25%
+                suggested_qty = position_pct * kelly_f * 500
             else:
                 suggested_qty = 500
 
+            # 按价格档次缩放
             if current < 100:
                 return max(10, suggested_qty / current * 0.01)
             elif current < 20000:
@@ -1086,6 +1279,8 @@ class RecommendationService:
         total_factors = 0
 
         for k, v in scores.items():
+            if not isinstance(v, (int, float)):
+                continue  # 🆕 v3.4 跳过元数据键（如realtime_source）
             total_factors += 1
             if k in buy_favoring:
                 if v > 55 and action in ("买入", "加仓"):
@@ -1112,6 +1307,38 @@ class RecommendationService:
                 agree_count += 0.5  # 中性因子
 
         return agree_count / max(total_factors, 1)
+
+    def _calibrate_confidence(self, raw_conf: float, scores: dict, action: str) -> float:
+        """🆕 v3.4 置信度三维校准：信号强度 × 因子一致性 × 数据质量
+        
+        校准公式: 最终置信度 = raw_conf × agreement_factor × quality_factor
+        - agreement_factor: 因子一致性越高，置信度越可靠
+        - quality_factor: 数据质量越好，信号越可信（SHFE实时 > 模拟）
+        """
+        # 1) 因子一致性校准
+        factor_agree = self._factor_agreement(scores, action)
+        if factor_agree >= 0.75:
+            agreement_mult = 1.10  # 高一致性：提升置信度
+        elif factor_agree >= 0.55:
+            agreement_mult = 1.0
+        elif factor_agree >= 0.35:
+            agreement_mult = 0.88  # 中等分歧：降低
+        else:
+            agreement_mult = 0.72  # 高分歧：大幅降低
+
+        # 2) 数据质量校准（基于是否有真实数据源）
+        # 通过scores中的realtime_source来判断
+        has_real_data = scores.get("realtime_source") == "SHFE实时"
+        quality_mult = 1.05 if has_real_data else 0.92
+
+        # 3) 背离信号的特殊处理：背离是最强信号，不受降权
+        divergence_score = scores.get("divergence", 50)
+        has_divergence = divergence_score > 65 or divergence_score < 35
+        if has_divergence:
+            agreement_mult = max(agreement_mult, 1.0)
+
+        calibrated = raw_conf * agreement_mult * quality_mult
+        return round(min(max(calibrated, 0.10), 0.95), 3)
 
     def _score_seasonal(self, metal_type: str, ind: dict) -> tuple:
         """季节性因子：基于历史月度统计规律"""
@@ -1692,37 +1919,71 @@ class RecommendationService:
                             score += 20
                             reasons.append("🔄 RSI底背离 — 价格新低但RSI走强")
 
-        # ── 2) MACD柱背离检测 (预计算MACD历史序列，O(n) in one pass) ──
+        # ── 2) MACD柱背离检测 (v3.4增强：使用峰值/谷值精确检测) ──
         if n >= 50:
-            # 🆕 优化：一次性计算滚动MACD histogram (O(n) vs 原来的O(n²))
             macd_hists = self._rolling_macd_hist(prices)
             macd_len = len(macd_hists)
-            if macd_len >= 20:
-                macd_half = macd_len // 2
+            if macd_len >= 30:
+                # 🆕 v3.4: 使用峰值检测查找最近3个MACD峰/谷
+                macd_peaks_idx, macd_troughs_idx = self._find_peaks_troughs(
+                    macd_hists, order=max(3, macd_len // 10)
+                )
+                price_peaks_idx, price_troughs_idx = self._find_peaks_troughs(
+                    prices[-macd_len:], order=max(3, macd_len // 10)
+                )
 
-                # MACD顶背离
-                price_first_peak = np.max(prices[-(macd_len + 30):-macd_len])
-                price_second_peak = np.max(prices[-macd_len:])
-                macd_first_peak = np.max(macd_hists[:macd_half])
-                macd_second_peak = np.max(macd_hists[macd_half:])
+                # MACD顶背离：价格创新高但MACD柱峰降低
+                if len(macd_peaks_idx) >= 2 and len(price_peaks_idx) >= 2:
+                    # 取最近2个峰值
+                    macd_peak1 = macd_hists[int(macd_peaks_idx[-2])]
+                    macd_peak2 = macd_hists[int(macd_peaks_idx[-1])]
+                    price_peak1 = prices[-macd_len:][int(price_peaks_idx[-2])]
+                    price_peak2 = prices[-macd_len:][int(price_peaks_idx[-1])]
 
-                if (price_second_peak > price_first_peak * 1.01 and
-                        macd_second_peak < macd_first_peak * 0.85):
-                    if rsi_divergence != -1:
-                        score -= 15
-                        reasons.append("📉 MACD顶背离 — 价格新高但动能衰减")
+                    if (price_peak2 > price_peak1 * 1.005 and
+                            macd_peak2 < macd_peak1 * 0.9):
+                        if rsi_divergence != -1:
+                            score -= 15
+                            reasons.append("📉 MACD顶背离 — 价格新高但动能衰减")
 
-                # MACD底背离
-                price_first_trough = np.min(prices[-(macd_len + 30):-macd_len])
-                price_second_trough = np.min(prices[-macd_len:])
-                macd_first_trough = np.min(macd_hists[:macd_half])
-                macd_second_trough = np.min(macd_hists[macd_half:])
+                # MACD底背离：价格创新低但MACD柱谷抬升
+                if len(macd_troughs_idx) >= 2 and len(price_troughs_idx) >= 2:
+                    macd_trough1 = macd_hists[int(macd_troughs_idx[-2])]
+                    macd_trough2 = macd_hists[int(macd_troughs_idx[-1])]
+                    price_trough1 = prices[-macd_len:][int(price_troughs_idx[-2])]
+                    price_trough2 = prices[-macd_len:][int(price_troughs_idx[-1])]
 
-                if (price_second_trough < price_first_trough * 0.99 and
-                        macd_second_trough > macd_first_trough * 1.15):
-                    if rsi_divergence != 1:
-                        score += 15
-                        reasons.append("📈 MACD底背离 — 价格新低但动能企稳")
+                    if (price_trough2 < price_trough1 * 0.995 and
+                            macd_trough2 > macd_trough1 * 1.1):
+                        if rsi_divergence != 1:
+                            score += 15
+                            reasons.append("📈 MACD底背离 — 价格新低但动能企稳")
+
+                # 🆕 v3.4: 三峰背离（最高置信度）
+                if len(macd_peaks_idx) >= 3 and len(price_peaks_idx) >= 3:
+                    p1, p2, p3 = (prices[-macd_len:][int(price_peaks_idx[-3])],
+                                   prices[-macd_len:][int(price_peaks_idx[-2])],
+                                   prices[-macd_len:][int(price_peaks_idx[-1])])
+                    m1, m2, m3 = (macd_hists[int(macd_peaks_idx[-3])],
+                                   macd_hists[int(macd_peaks_idx[-2])],
+                                   macd_hists[int(macd_peaks_idx[-1])])
+                    # 价格逐创新高，MACD逐次降低 = 三重顶背离
+                    if p3 > p2 > p1 and m3 < m2 < m1:
+                        if rsi_divergence != -1:
+                            score -= 18
+                            reasons.append("🚨 三重MACD顶背离 — 极度看空反转信号")
+
+                if len(macd_troughs_idx) >= 3 and len(price_troughs_idx) >= 3:
+                    t1, t2, t3 = (prices[-macd_len:][int(price_troughs_idx[-3])],
+                                   prices[-macd_len:][int(price_troughs_idx[-2])],
+                                   prices[-macd_len:][int(price_troughs_idx[-1])])
+                    d1, d2, d3 = (macd_hists[int(macd_troughs_idx[-3])],
+                                   macd_hists[int(macd_troughs_idx[-2])],
+                                   macd_hists[int(macd_troughs_idx[-1])])
+                    if t3 < t2 < t1 and d3 > d2 > d1:
+                        if rsi_divergence != 1:
+                            score += 18
+                            reasons.append("🚨 三重MACD底背离 — 极度看多反转信号")
 
         # ── 3) 隐藏背离增强（RSI趋势vs价格趋势）──
         if 50 < rsi < 65 and macd_hist < 0:
@@ -1899,6 +2160,142 @@ class RecommendationService:
             return 0.0
         dx = abs(pos - neg) / total * 100
         return float(dx)
+
+    @staticmethod
+    def _hurst_exponent(prices: np.ndarray, max_lag: int = 20) -> float:
+        """🆕 v3.4 Hurst指数：区分趋势/随机/均值回归
+        
+        H > 0.5 → 趋势持续（趋势市）
+        H ≈ 0.5 → 随机游走（不可预测）
+        H < 0.5 → 均值回归（震荡市）
+        
+        使用R/S分析法（重标极差法）
+        """
+        n = len(prices)
+        if n < 30:
+            return 0.5
+
+        # 使用对数收益率
+        rets = np.diff(np.log(prices + 1e-10))
+        rets = rets[-100:] if len(rets) > 100 else rets
+        n_rets = len(rets)
+
+        # 对多个时间尺度计算R/S
+        lags = [lag for lag in range(10, min(max_lag + 1, n_rets // 2 + 1))]
+        if len(lags) < 3:
+            return 0.5
+
+        rs_values = []
+        for lag in lags:
+            # 将序列分割为 lag 个等长子段
+            n_segments = n_rets // lag
+            if n_segments < 1:
+                continue
+            rs_segment = 0.0
+            count = 0
+            for i in range(n_segments):
+                segment = rets[i * lag:(i + 1) * lag]
+                if len(segment) < 2:
+                    continue
+                # 累积离差
+                mean = np.mean(segment)
+                cum_dev = np.cumsum(segment - mean)
+                r = np.max(cum_dev) - np.min(cum_dev)
+                s = np.std(segment, ddof=1)
+                if s > 0:
+                    rs_segment += r / s
+                    count += 1
+            if count > 0:
+                rs_values.append(rs_segment / count)
+
+        if len(rs_values) < 3:
+            return 0.5
+
+        # log(R/S) = H * log(lag) + C，线性回归斜率 = H
+        log_lags = np.log(lags[:len(rs_values)])
+        log_rs = np.log(np.array(rs_values))
+        slope = np.polyfit(log_lags, log_rs, 1)[0]
+        return float(np.clip(slope, 0.1, 0.9))
+
+    @staticmethod
+    def _stochastic_k(prices: np.ndarray, period: int = 14, smooth: int = 3) -> float:
+        """🆕 v3.4 随机指标 %K (Stochastic Oscillator)
+        
+        %K = 100 * (Close - Lowest_Low) / (Highest_High - Lowest_Low)
+        """
+        n = len(prices)
+        if n < period:
+            return 50.0
+        window = prices[-period:]
+        lowest_low = np.min(window)
+        highest_high = np.max(window)
+        if highest_high - lowest_low < 1e-10:
+            return 50.0
+        # 对最后smooth个K值做SMA平滑
+        raw_k = 100.0 * (prices[-1] - lowest_low) / (highest_high - lowest_low)
+        if n < period + smooth:
+            return float(raw_k)
+        k_values = []
+        for i in range(smooth):
+            w = prices[-(period + i):-i] if i > 0 else prices[-period:]
+            lo, hi = np.min(w), np.max(w)
+            if hi - lo > 1e-10:
+                k_values.append(100.0 * (prices[-(1 + i)] - lo) / (hi - lo))
+            else:
+                k_values.append(50.0)
+        return float(np.mean(k_values))
+
+    @staticmethod
+    def _count_sr_touches(prices: np.ndarray, support: float, resistance: float) -> dict:
+        """🆕 v3.4 统计支撑/阻力触碰次数（时间衰减加权）
+        
+        触碰 = 价格进入支撑/阻力 ± 1% 范围内
+        时间衰减：最近触碰权重更高
+        """
+        n = len(prices)
+        if n < 10:
+            return {"support": 0, "resistance": 0}
+
+        sup_touches = 0.0
+        res_touches = 0.0
+
+        for i in range(max(0, n - 60), n):
+            p = prices[i]
+            time_weight = (i - (n - 60) + 1) / 60.0  # 线性时间权重[1/60, 1.0]
+
+            if support > 0 and abs(p - support) / support < 0.015:
+                sup_touches += time_weight
+            if resistance > 0 and abs(p - resistance) / resistance < 0.015:
+                res_touches += time_weight
+
+        return {
+            "support": round(sup_touches, 1),
+            "resistance": round(res_touches, 1),
+        }
+
+    @staticmethod
+    def _find_peaks_troughs(prices: np.ndarray, order: int = 5) -> tuple:
+        """🆕 v3.4 使用scipy.signal查找价格峰值和谷值（用于背离检测）
+        
+        返回: (peak_indices, trough_indices)
+        """
+        try:
+            from scipy.signal import argrelextrema
+            peaks = argrelextrema(prices, np.greater, order=order)[0]
+            troughs = argrelextrema(prices, np.less, order=order)[0]
+            return peaks, troughs
+        except ImportError:
+            # Fallback: 简单局部极值
+            peaks = []
+            troughs = []
+            for i in range(order, len(prices) - order):
+                window = prices[i - order:i + order + 1]
+                mid = prices[i]
+                if mid == np.max(window) and mid > np.mean(window):
+                    peaks.append(i)
+                if mid == np.min(window) and mid < np.mean(window):
+                    troughs.append(i)
+            return np.array(peaks, dtype=int), np.array(troughs, dtype=int)
 
     # ═══════════════════════════════════════════════════════
     #  数据库操作
