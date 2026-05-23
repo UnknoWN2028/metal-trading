@@ -513,15 +513,24 @@ class MetalPriceService:
 
     def _get_real_history_df(self, metal_type: str, days: int,
                               cfg: dict) -> pd.DataFrame:
-        """获取真实K线DataFrame，可按天切片"""
+        """获取真实K线DataFrame，自动检测并重采样高频数据为日线"""
         if metal_type in self._real_history:
             df = self._real_history[metal_type]
             if df is None or (hasattr(df, 'empty') and df.empty):
                 return None
-            # 防御：确保是DataFrame且有'date'和'price'列
             if not isinstance(df, pd.DataFrame) or 'date' not in df.columns or 'price' not in df.columns:
                 return None
             df = df.copy()
+
+            # 🆕 v3.4: 检测高频数据 → 重采样为日线
+            if len(df) > days * 3:  # 超过日线3倍=高频数据
+                df['date_d'] = pd.to_datetime(df['date']).dt.date
+                df = df.groupby('date_d').agg({'price': 'last'}).reset_index()
+                df.rename(columns={'date_d': 'date'}, inplace=True)
+                df['date'] = pd.to_datetime(df['date'])
+                # 更新缓存为重采样后的日线
+                self._real_history[metal_type] = df
+
             cutoff = datetime.now() - timedelta(days=days)
             df = df[df['date'] >= cutoff]
             if len(df) >= 5:

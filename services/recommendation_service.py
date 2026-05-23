@@ -2190,7 +2190,8 @@ class RecommendationService:
 
         # 使用对数收益率
         rets = np.diff(np.log(prices + 1e-10))
-        rets = rets[-100:] if len(rets) > 100 else rets
+        # 使用全部可用收益率（最多200天），而非截断到100
+        rets = rets[-min(len(rets), 200):]
         n_rets = len(rets)
 
         # 对多个时间尺度计算R/S
