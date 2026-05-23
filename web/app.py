@@ -100,14 +100,6 @@ def _invalidate_sidebar():
 # ═══════════════════════════════════════════════════════════
 if "_auto_connected" not in st.session_state:
     st.session_state["_auto_connected"] = True
-    if not services["price"].is_using_real_data:
-        result = services["price"].auto_connect()
-        if result["success"]:
-            _safe_toast(f"✅ {result['message']}")
-        else:
-            _safe_toast(f"⚠️ {result.get('message', 'SHFE连接失败')}")
-        _invalidate_sidebar()
-        st.rerun()
 
 # 🆕 启动时检查推荐回测结果
 if "_feedback_checked" not in st.session_state:
@@ -256,13 +248,13 @@ with st.sidebar:
     else:
         st.warning("📀 本地模拟数据")
         if st.button("📡 连接实时行情", width='stretch',
-                     help="从上海期货交易所获取实时数据",
-                     type="primary"):
-            with st.spinner("连接SHFE中（最长30秒）..."):
-                try:
-                    result = services["price"].try_fetch_real()
-                except Exception as e:
-                    result = {"success": False, "message": str(e)}
+                     help="从上海期货交易所获取实时数据（需国内网络）"):
+            import signal
+            st.info("正在连接上海期货交易所...")
+            try:
+                result = services["price"].try_fetch_real()
+            except Exception as e:
+                result = {"success": False, "message": f"网络超时: {e}"}
             if result["success"]:
                 st.success(result["message"])
                 st.cache_data.clear()
@@ -270,7 +262,7 @@ with st.sidebar:
                 time.sleep(0.5)
                 st.rerun()
             else:
-                st.error(f"连接失败: {result.get('message', '未知')}")
+                st.warning("Streamlit Cloud 服务器在海外，无法连接国内行情")
 
     # LLM
     st.caption("🧠 AI 状态")
