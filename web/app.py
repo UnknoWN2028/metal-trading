@@ -13,6 +13,7 @@ from services.inventory_service import InventoryService
 from services.recommendation_service import RecommendationService
 from services.alert_service import AlertService
 from services.llm_service import LLMService
+from services.news_service import NewsService
 from services.feedback_service import FeedbackService
 from web.styles import (
     inject_css, kpi_card, section_header,
