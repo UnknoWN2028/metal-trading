@@ -289,7 +289,7 @@ with st.sidebar:
     except Exception as e:
         import traceback
         st.caption(f"⚠ 行情异常: {e}")
-        st.caption(traceback.format_exc()[-200:])
+        st.caption(traceback.format_exc())
 
     st.markdown("---")
     st.caption("📰 金属快讯")
