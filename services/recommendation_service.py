@@ -655,48 +655,56 @@ class RecommendationService:
         score = 50
         reasons = []
 
-        # RSI (25分贡献) — v3.4: 平滑阈值区间
+        # RSI (25分贡献) — 🆕 v3.4: 补齐55-65看多区间
         rsi = ind["rsi"]
         if rsi < 25:
             score += 25
             reasons.append(f"🔥 RSI={rsi:.0f} 深度超卖")
         elif rsi < 35:
-            # 线性插值 25-35 → 25-10分
             score += 25 - (rsi - 25) * 1.5
             reasons.append(f"📊 RSI={rsi:.0f} 超卖区域")
+        elif rsi < 45:
+            # 🆕 35-45 偏弱但未超卖
+            score -= (45 - rsi) * 0.5
+        elif rsi <= 55:
+            reasons.append(f"⚖️ RSI={rsi:.0f} 中性")
+        elif rsi <= 65:
+            # 🆕 55-65 温和看多（之前是空白区间！）
+            score += (rsi - 55) * 0.8
+            reasons.append(f"📈 RSI={rsi:.0f} 温和偏多")
         elif rsi > 75:
             score -= 25
             reasons.append(f"🧊 RSI={rsi:.0f} 深度超买")
         elif rsi > 65:
-            # 线性插值 65-75 → -10到-25分
             score -= 10 + (rsi - 65) * 1.5
             reasons.append(f"📊 RSI={rsi:.0f} 超买区域")
-        elif 45 <= rsi <= 55:
-            reasons.append(f"⚖️ RSI={rsi:.0f} 中性")
 
-        # MACD (15分贡献)
+        # MACD (15分贡献) — 🆕 v3.4: MACD值缩放
         macd = ind["macd"]
         signal = ind["macd_signal"]
         hist = ind["macd_hist"]
+        # 用MACD线相对于价格的比例来衡量信号强度
+        cur = ind["current"]
+        macd_ratio = abs(macd) / max(cur, 1e-6)
+        macd_strength = min(macd_ratio / 0.003, 1.5)  # 0.3%以上=强信号
 
         if macd > signal and hist > 0:
-            score += 15
+            score += int(15 * macd_strength)
             if macd > 0:
-                reasons.append("📈 MACD金叉+零轴上")
+                reasons.append(f"📈 MACD金叉+零轴上({macd_ratio*100:.2f}%)")
             else:
-                reasons.append("📈 MACD金叉")
+                reasons.append(f"📈 MACD金叉({macd_ratio*100:.2f}%)")
         elif macd < signal and hist < 0:
-            score -= 15
+            score -= int(15 * macd_strength)
             if macd < 0:
-                reasons.append("📉 MACD死叉+零轴下")
+                reasons.append(f"📉 MACD死叉+零轴下({macd_ratio*100:.2f}%)")
             else:
-                reasons.append("📉 MACD死叉")
-        # 🆕 v3.4 MACD柱收敛/发散
+                reasons.append(f"📉 MACD死叉({macd_ratio*100:.2f}%)")
         elif hist > 0 and macd > signal:
-            score += 5
+            score += int(5 * macd_strength)
             reasons.append("📊 MACD柱正值扩张")
         elif hist < 0 and macd < signal:
-            score -= 5
+            score -= int(5 * macd_strength)
 
         # 🆕 v3.4 随机指标 Stochastic (10分贡献)
         stoch = ind.get("stoch_k", 50)
