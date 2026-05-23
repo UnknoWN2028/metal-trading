@@ -1117,7 +1117,7 @@ class RecommendationService:
                 conf = min(conf * 1.12, 0.95)
             return action, self._calibrate_confidence(conf, scores, action)
 
-        if composite >= 60:  # 🆕 v3.4: 从65降到60，更早捕获信号
+        if composite >= 52:  # 🆕 从60降到52，匹配真实分数分布
             if has_inv:
                 if profit_pct > 8:
                     action, conf = "卖出", min(0.75 * vol_discount, 0.88)
@@ -1131,7 +1131,7 @@ class RecommendationService:
                 conf = min(conf * 1.10, 0.85)
             return action, self._calibrate_confidence(conf, scores, action)
 
-        if composite >= 55:
+        if composite >= 48:  # 🆕 从55降到48
             if has_inv:
                 if profit_pct > 12:
                     return "减仓", self._calibrate_confidence(0.65, scores, "减仓")
