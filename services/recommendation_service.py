@@ -1075,8 +1075,8 @@ class RecommendationService:
             return "卖出", self._calibrate_confidence(conf, scores, "卖出")
 
         if has_bearish_div and not has_inv:
-            # 🆕 v3.4: 背离分级处理——强背离拦截，弱背离降权放行
-            if divergence_score < 25:  # 强顶背离（三重/深度）→ 坚决不买
+            # 🔴 如果Cloud显示此行=新版，否则=旧版
+            if divergence_score < 25:
                 return "观望", self._calibrate_confidence(0.55, scores, "观望")
             else:  # 普通顶背离 → 放行但降信心
                 vol_discount *= 0.80

@@ -481,12 +481,15 @@ if page == "📊 仪表盘":
             for mt in list(METAL_TYPES.keys())[:4]:
                 df, src = services["price"].get_historical_prices(mt, 120)
                 ind = services["recommendation"]._compute_indicators(df['price'].values)
+                # 🆕 跑一遍完整分析拿综合分和背离分
+                result = services["recommendation"].analyze_and_recommend(mt, save_to_db=False)
+                ta = result.get('trend_analysis', {})
                 st.markdown(
                     f"**{mt}** | 数据源:`{src}` | 数据点:`{ind['n']}` | "
-                    f"RSI:`{ind['rsi']:.1f}` | MACD:`{ind['macd']:.4f}` | "
-                    f"Hurst:`{ind.get('hurst',0.5):.2f}` | "
-                    f"%B:`{ind.get('bb_pct_b',0.5):.2f}` | "
-                    f"ADX:`{ind.get('adx',15):.0f}`"
+                    f"综合分:`{ta.get('composite_score','?')}` | "
+                    f"背离分:`{ta.get('divergence_score','?')}` | "
+                    f"决策:`{result['action']}`({result['confidence']}) | "
+                    f"RSI:`{ind['rsi']:.1f}` | ADX:`{ind.get('adx',15):.0f}`"
                 )
         except Exception as e:
             st.error(f"诊断异常: {e}")
