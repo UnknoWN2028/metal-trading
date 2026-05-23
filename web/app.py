@@ -174,13 +174,16 @@ def get_news_headlines(limit=8):
 # ═══════════════════════════════════════════════════════════
 def _sidebar_fetch():
     """统一获取侧边栏价格+快讯，结果存入session_state"""
+    # 价格和快讯分开取，一个挂了不影响另一个
     try:
         st.session_state["_sidebar_prices"] = get_cached_prices()
-        st.session_state["_sidebar_news"] = get_news_headlines(5)
-        st.session_state["_sidebar_ver"] = st.session_state.get("_price_ver", 0)
     except Exception:
         st.session_state.setdefault("_sidebar_prices", [])
+    try:
+        st.session_state["_sidebar_news"] = get_news_headlines(5)
+    except Exception:
         st.session_state.setdefault("_sidebar_news", [])
+    st.session_state["_sidebar_ver"] = st.session_state.get("_price_ver", 0)
 
 # 首次或版本过期时刷新
 _cur_ver = st.session_state.get("_price_ver", 0)
