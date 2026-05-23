@@ -1031,8 +1031,8 @@ class RecommendationService:
         决策层级:
           composite >= 75 → 强烈买入/卖出
           composite >= 65 → 买入/卖出（正常）
-          composite >= 55 → 偏多/偏空（小幅操作）
-          composite >= 45 → 持有观望
+          composite >= 55 → 偏多试探(OR条件入场)
+          composite >= 45 → 持有/观望(+RSI超卖抄底)
           composite >= 35 → 偏空/减仓
           composite < 35  → 强烈卖出/止损
         """
@@ -1114,9 +1114,9 @@ class RecommendationService:
                 else:
                     action, conf = "持有", 0.45
             else:
-                action, conf = "买入", min(0.68 * vol_discount, 0.80)
+                action, conf = "买入", min(0.65 * vol_discount, 0.78)
             if action in ("买入",) and multi_tf_bullish:
-                conf = min(conf * 1.10, 0.88)
+                conf = min(conf * 1.10, 0.85)
             return action, self._calibrate_confidence(conf, scores, action)
 
         if composite >= 55:
@@ -1125,9 +1125,11 @@ class RecommendationService:
                     return "减仓", self._calibrate_confidence(0.65, scores, "减仓")
                 return "持有", self._calibrate_confidence(0.50, scores, "持有")
             else:
-                if ind["current"] > ind["ma20"] and adx > 20:
-                    return "买入", self._calibrate_confidence(0.42, scores, "买入")
-                return "观望", self._calibrate_confidence(0.35, scores, "观望")
+                # 🆕 OR条件：价格>MA20 或 ADX>18 或 Hurst>0.55
+                entry_ok = (ind["current"] > ind["ma20"]) or (adx > 18) or (hurst > 0.55)
+                if entry_ok:
+                    return "买入", self._calibrate_confidence(0.40, scores, "买入")
+                return "观望", self._calibrate_confidence(0.33, scores, "观望")
 
         if composite >= 45:
             if has_inv:
@@ -1136,7 +1138,10 @@ class RecommendationService:
                 if profit_pct < -10:
                     return "减仓", self._calibrate_confidence(0.45, scores, "减仓")
                 return "持有", self._calibrate_confidence(0.40, scores, "持有")
-            return "观望", self._calibrate_confidence(0.30, scores, "观望")
+            # 🆕 无持仓+RSI超卖 → 试探买入
+            if rsi < 35:
+                return "买入", self._calibrate_confidence(0.30, scores, "买入")
+            return "观望", self._calibrate_confidence(0.28, scores, "观望")
 
         if composite >= 35:
             if has_inv:
