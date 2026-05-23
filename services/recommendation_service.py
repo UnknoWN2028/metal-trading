@@ -1278,22 +1278,18 @@ class RecommendationService:
             else:
                 kelly_f = 0.05
 
-            # 🆕 v3.4: 波动率调整后的风险预算
+            # 🆕 v3.4: 按风险预算算仓位百分比，不猜本金
             risk_budget = 0.015  # 单笔风险预算1.5%
             if volatility > 0 and current > 0:
-                position_pct = (risk_budget * confidence) / max(volatility * 2.0, 1e-6)
-                position_pct = min(position_pct, 0.25)  # 单品种上限25%
-                suggested_qty = position_pct * kelly_f * 500
+                # 仓位% = 风险预算 / (波动率 × 止损倍数)
+                stop_mult = 2.5 if atr > 0 else 2.0
+                position_pct = risk_budget / max(volatility * stop_mult, 1e-6)
+                position_pct = min(position_pct, 0.25)
+                suggested_qty = position_pct * 100  # 转为百分比数值用于显示
             else:
-                suggested_qty = 500
-
-            # 按价格档次缩放
-            if current < 100:
-                return max(10, suggested_qty / current * 0.01)
-            elif current < 20000:
-                return max(500, suggested_qty / current * 0.1)
-            else:
-                return max(1000, suggested_qty / current * 0.05)
+                suggested_qty = 5
+            # 返回仓位百分比（非绝对kg），UI层需解释
+            return round(suggested_qty, 1)
 
         return 0
 

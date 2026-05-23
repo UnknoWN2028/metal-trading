@@ -787,7 +787,7 @@ def recommendation_card(rec: dict, index: int, action_type: str):
         <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:0.78rem;color:#6B7280;">
             <span>🎯 止损: <b style="color:#EF4444;">¥{sl:,.0f}</b></span>
             <span>🏁 止盈: <b style="color:#10B981;">¥{tp:,.0f}</b></span>
-            <span>📦 建议量: <b style="color:#C8923A;">{qty:,.0f}kg</b></span>
+            <span>📦 建议仓位: <b style="color:#C8923A;">{qty:.0f}%</b></span>
             {profit_line}
             {agree_line}
         </div>
