@@ -7,6 +7,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Force fresh import on Streamlit Cloud (clear stale .pyc caches)
+import importlib
+for mod in list(sys.modules):
+    if 'services' in mod or 'database' in mod or 'config' in mod:
+        del sys.modules[mod]
+importlib.invalidate_caches()
+
 from database import init_db, SessionLocal
 from services.price_service import MetalPriceService
 from services.inventory_service import InventoryService
@@ -23,12 +30,6 @@ from web.styles import (
     PLOTLY_FAST_CONFIG,
 )
 import pandas as pd
-# Force fresh import on Streamlit Cloud (clear stale .pyc caches)
-import importlib, sys
-for mod in list(sys.modules):
-    if 'services' in mod or 'database' in mod or 'config' in mod:
-        del sys.modules[mod]
-importlib.invalidate_caches()
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
@@ -292,10 +293,8 @@ with st.sidebar:
             )
         if shown == 0:
             st.caption("（数据加载中...）")
-    except Exception as e:
-        import traceback
-        st.caption(f"⚠ 行情异常: {e}")
-        st.caption(traceback.format_exc())
+    except Exception:
+        st.caption("（行情暂不可用）")
 
     st.markdown("---")
     st.caption("📰 金属快讯")

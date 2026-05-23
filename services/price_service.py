@@ -1,4 +1,3 @@
-# v3.5 sidebar fix
 """
 金属价格数据服务
 默认本地模拟(秒开)，连接SHFE后：现货+历史K线+技术指标全真实
@@ -30,8 +29,6 @@ class MetalPriceService:
     # ============================================================
 
     def fetch_all_current_prices(self) -> list[dict]:
-        import logging
-        logging.getLogger(__name__).warning("VERSION: inline _current_price fix")
         from config import METAL_TYPES
         now = datetime.now()
         results = []
