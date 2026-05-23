@@ -201,7 +201,7 @@ class RecommendationService:
         )
         suggested_qty = self._kelly_position_v3(
             action, inventory_items, current, ind["volatility_30d"], atr, confidence
-        )
+        ) if confidence > 0 else 0
 
         expected_profit = 0
         if inventory_items and action in ("卖出", "减仓"):
@@ -1229,69 +1229,26 @@ class RecommendationService:
     def _kelly_position_v3(self, action: str, inventory_items: list,
                             current: float, volatility: float, atr: float,
                             confidence: float) -> float:
-        """🆕 v3.4 Half-Kelly仓位：凯利×0.5安全边际 + 组合敞口上限
-        
-        原始凯利容易高估最优仓位，Half-Kelly在实践中更稳健
-        对卖出/减仓也应用比例缩放，避免一次性清仓"""
-        HALF_KELLY = 0.5  # 安全边际系数
+        """🆕 v3.4 仓位百分比（不猜本金，纯比例）"""
+        try:
+            if action in ("持有", "观望"):
+                return 0
 
-        if action in ("持有", "观望"):
+            if action in ("卖出", "减仓", "止损") and inventory_items:
+                total_kg = sum(it['quantity_kg'] for it in inventory_items)
+                return round(total_kg * 0.3, 1)  # 简化为建议减30%
+
+            if action in ("买入", "加仓"):
+                if volatility > 0 and current > 0:
+                    stop_mult = 2.5 if atr > 0 else 2.0
+                    position_pct = 0.015 / max(volatility * stop_mult, 1e-6)
+                    position_pct = min(position_pct, 0.30)
+                    return round(position_pct * 100, 1)
+                return 5.0
+
             return 0
-
-        if action in ("卖出", "减仓", "止损") and inventory_items:
-            total_kg = sum(it['quantity_kg'] for it in inventory_items)
-            avg_cost = np.mean([it['avg_cost_price'] for it in inventory_items])
-            profit_pct = (current - avg_cost) / avg_cost if avg_cost > 0 else 0
-
-            if action == "止损":
-                # 🆕 v3.4: 止损也分级别，不全清
-                if profit_pct < -0.15:
-                    return total_kg * 0.85  # 深度亏损止损85%
-                return total_kg * 0.65  # 一般止损65%
-
-            # 🆕 v3.4: 阶梯式减仓（Half-Kelly理念：不全量一次性卖出）
-            if profit_pct > 0.25:
-                return total_kg * 0.7
-            elif profit_pct > 0.15:
-                return total_kg * 0.5
-            elif profit_pct > 0.08:
-                return total_kg * 0.35
-            elif profit_pct > 0.03:
-                return total_kg * 0.2
-            elif profit_pct > -0.03:
-                return total_kg * 0.12
-            else:
-                return total_kg * max(0.03, confidence * 0.2)
-
-        if action in ("买入", "加仓"):
-            # Half-Kelly: f* = (p*b - q) / b * 0.5
-            # p=胜率, b=赔率(avg_win/avg_loss), q=1-p
-            win_prob = min(max(confidence, 0.35), 0.75)
-            loss_prob = 1.0 - win_prob
-            avg_win = volatility * 1.5  # 预期收益
-            avg_loss_rate = max(atr / current, 0.005)  # 预期损失率
-            if avg_loss_rate > 0:
-                odds = avg_win / avg_loss_rate  # 赔率
-                raw_kelly = max(0.01, (win_prob * odds - loss_prob) / max(odds, 1e-8))
-                kelly_f = raw_kelly * HALF_KELLY  # 🆕 Half-Kelly
-                kelly_f = min(kelly_f, 0.15)  # 🆕 上限降至15%（更保守）
-            else:
-                kelly_f = 0.05
-
-            # 🆕 v3.4: 按风险预算算仓位百分比，不猜本金
-            risk_budget = 0.015  # 单笔风险预算1.5%
-            if volatility > 0 and current > 0:
-                # 仓位% = 风险预算 / (波动率 × 止损倍数)
-                stop_mult = 2.5 if atr > 0 else 2.0
-                position_pct = risk_budget / max(volatility * stop_mult, 1e-6)
-                position_pct = min(position_pct, 0.25)
-                suggested_qty = position_pct * 100  # 转为百分比数值用于显示
-            else:
-                suggested_qty = 5
-            # 返回仓位百分比（非绝对kg），UI层需解释
-            return round(suggested_qty, 1)
-
-        return 0
+        except Exception:
+            return 0
 
     def _factor_agreement(self, scores: dict, action: str) -> float:
         """🆕 因子一致性：各因子对决策方向的一致性比例"""
