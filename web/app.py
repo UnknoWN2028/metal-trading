@@ -264,7 +264,11 @@ with st.sidebar:
     st.markdown("---")
     st.caption("⚡ 快速行情")
     try:
+        shown = 0
         for p in _sidebar_prices[:6]:
+            if not p or not p.get("price"):
+                continue
+            shown += 1
             chg = p.get('change_pct', 0)
             sign = "+" if chg >= 0 else ""
             color = "#10B981" if chg >= 0 else "#EF4444"
@@ -277,8 +281,10 @@ with st.sidebar:
                 f'<span style="color:{color};font-weight:600;">{sign}{chg:.2f}%</span></div>',
                 unsafe_allow_html=True,
             )
+        if shown == 0:
+            st.caption("（数据加载中...）")
     except Exception:
-        pass
+        st.caption("（行情暂不可用）")
 
     st.markdown("---")
     st.caption("📰 金属快讯")
