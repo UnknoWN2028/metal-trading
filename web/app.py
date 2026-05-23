@@ -266,10 +266,10 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("⚡ 快速行情")
-    
     try:
+        raw_prices = services["price"].fetch_all_current_prices()
         shown = 0
-        for p in _sidebar_prices[:6]:
+        for p in raw_prices[:6]:
             if not p or not p.get("price"):
                 continue
             shown += 1
@@ -277,9 +277,8 @@ with st.sidebar:
             sign = "+" if chg >= 0 else ""
             color = "#10B981" if chg >= 0 else "#EF4444"
             st.markdown(
-                f'<div style="display:flex;justify-content:space-between;'
+                f'<div style="display:flex;justify-content:space-between;'  
                 f'font-size:0.82rem;margin:3px 0;">'
-                f'<span style="color:#6B7280;">'
                 f'{p["metal_type"]}</span>'
                 f'<span style="color:#1A1D26;font-weight:600;">¥{p["price"]:,.0f}</span>'
                 f'<span style="color:{color};font-weight:600;">{sign}{chg:.2f}%</span></div>',
@@ -287,8 +286,8 @@ with st.sidebar:
             )
         if shown == 0:
             st.caption("（数据加载中...）")
-    except Exception:
-        st.caption("（行情暂不可用）")
+    except Exception as e:
+        st.caption(f"⚠ 行情异常: {e}")
 
     st.markdown("---")
     st.caption("📰 金属快讯")
