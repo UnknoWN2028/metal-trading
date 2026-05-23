@@ -2,6 +2,7 @@
 有色金属回收倒卖AI系统 v3 — 专业版UI
 """
 import streamlit as st
+import time
 import sys
 from pathlib import Path
 
@@ -255,16 +256,21 @@ with st.sidebar:
     else:
         st.warning("📀 本地模拟数据")
         if st.button("📡 连接实时行情", width='stretch',
-                     help="从上海期货交易所获取实时数据"):
-            with st.spinner("连接SHFE..."):
-                result = services["price"].try_fetch_real()
-                if result["success"]:
-                    _safe_toast(f"✅ {result['message']}")
-                else:
-                    _safe_toast(f"⚠️ {result.get('message', '连接失败')}")
+                     help="从上海期货交易所获取实时数据",
+                     type="primary"):
+            with st.spinner("连接SHFE中（最长30秒）..."):
+                try:
+                    result = services["price"].try_fetch_real()
+                except Exception as e:
+                    result = {"success": False, "message": str(e)}
+            if result["success"]:
+                st.success(result["message"])
                 st.cache_data.clear()
                 _invalidate_sidebar()
+                time.sleep(0.5)
                 st.rerun()
+            else:
+                st.error(f"连接失败: {result.get('message', '未知')}")
 
     # LLM
     st.caption("🧠 AI 状态")
