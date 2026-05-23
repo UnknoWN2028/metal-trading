@@ -688,6 +688,9 @@ class MetalPriceService:
         # 确保价格为正数
         prices = np.maximum(prices, base * 0.5)
         return prices
+
+    def _current_price(self, metal: str, cfg: dict) -> dict:
+        """获取单个金属的当前价格和涨跌幅"""
         if self._use_real and metal in self._real_prices:
             info = self._real_prices[metal]
             return {
@@ -727,3 +730,4 @@ def _sf(row: dict, *keys: str, default: float = 0) -> float:
             except (ValueError, TypeError):
                 continue
     return default
+
