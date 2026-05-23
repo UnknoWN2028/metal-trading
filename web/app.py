@@ -80,8 +80,10 @@ def init_services():
         "feedback": FeedbackService(sf, price_svc),
     }
 
-# Clear Streamlit resource cache (old service instances from stale .pyc)
-st.cache_resource.clear()
+# 仅首次加载时清除缓存（避免每次 rerun 销毁服务状态）
+if "_svc_init" not in st.session_state:
+    st.cache_resource.clear()
+    st.session_state["_svc_init"] = True
 services = init_services()
 
 def _safe_toast(msg, icon=None):
