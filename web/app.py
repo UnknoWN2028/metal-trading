@@ -174,20 +174,14 @@ def get_news_headlines(limit=8):
 # ═══════════════════════════════════════════════════════════
 def _sidebar_fetch():
     """统一获取侧边栏价格+快讯，结果存入session_state"""
-    # 价格和快讯分开取，一个挂了不影响另一个
     try:
-        raw = get_cached_prices()
-        st.session_state["_sidebar_prices"] = raw
-        st.session_state["_sidebar_err"] = ""
-    except Exception as e:
+        st.session_state["_sidebar_prices"] = get_cached_prices()
+    except Exception:
         st.session_state["_sidebar_prices"] = []
-        st.session_state["_sidebar_err"] = f"prices: {e}"
     try:
         st.session_state["_sidebar_news"] = get_news_headlines(5)
-    except Exception as e:
+    except Exception:
         st.session_state["_sidebar_news"] = []
-        old_err = st.session_state.get("_sidebar_err", "")
-        st.session_state["_sidebar_err"] = old_err + (" | news: " if old_err else "") + str(e)
     st.session_state["_sidebar_ver"] = st.session_state.get("_price_ver", 0)
 
 # 首次或版本过期或上次为空时刷新
@@ -272,7 +266,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("⚡ 快速行情")
-    st.caption(f"⚡ DEBUG: count={len(_sidebar_prices)}, err={st.session_state.get("_sidebar_err","-")[:80]}")
+    
     try:
         shown = 0
         for p in _sidebar_prices[:6]:

@@ -33,13 +33,32 @@ class MetalPriceService:
         now = datetime.now()
         results = []
         for metal, cfg in METAL_TYPES.items():
-            p = self._current_price(metal, cfg)
+            if self._use_real and metal in self._real_prices:
+                info = self._real_prices[metal]
+                price = info["price"]
+                change_pct = info["change_pct"]
+                high = info["high"]
+                low = info["low"]
+                volume = int(info.get("volume", 0))
+                source = "SHFE实时"
+            else:
+                base = cfg.get("base_price", 50000)
+                vol = cfg.get("volatility", 0.01)
+                seed = self._get_seed(metal)
+                rng = np.random.RandomState(seed)
+                noise = rng.normal(0, vol)
+                price = base * (1 + noise)
+                change_pct = noise * 100
+                high = price * (1 + abs(noise) * 0.5)
+                low = price * (1 - abs(noise) * 0.5)
+                volume = int(rng.randint(1000, 50000))
+                source = "模拟"
             results.append({
                 "metal_type": metal, "metal_symbol": cfg["symbol"],
-                "price": round(p["price"], 2),
-                "change_pct": round(p["change_pct"], 2),
-                "high": round(p["high"], 2), "low": round(p["low"], 2),
-                "volume": p["volume"], "source": p["source"],
+                "price": round(price, 2),
+                "change_pct": round(change_pct, 2),
+                "high": round(high, 2), "low": round(low, 2),
+                "volume": volume, "source": source,
                 "timestamp": now.isoformat(),
             })
         return results
