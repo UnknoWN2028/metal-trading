@@ -1,5 +1,6 @@
 """
-有色金属回收倒卖AI系统 v3 — 专业版UI
+有色金属回收倒卖AI系统 v4 — 专业版UI
+优化: 卡片布局 / 侧边栏精简 / 视觉层次 / 修复HTML
 """
 import streamlit as st
 import time
@@ -28,7 +29,9 @@ from web.styles import (
     confidence_indicator, empty_state, factor_scores_card,
     recommendation_card, styled_plotly, plotly_theme,
     mobile_kpi_row, mobile_bottom_nav,
-    PLOTLY_FAST_CONFIG,
+    PLOTLY_FAST_CONFIG, PALETTE,
+    sidebar_section_title, sidebar_price_row, sidebar_news_item,
+    datasource_badge, news_item_card, backtest_outcome_card, roi_display,
 )
 import pandas as pd
 import plotly.graph_objects as go
@@ -45,20 +48,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 inject_css()
-
-# ── 移动端检测 JS ──
-st.markdown("""
-<script>
-(function() {
-    var w = window.innerWidth;
-    var div = document.createElement('div');
-    div.setAttribute('data-mobile-detected', w < 768 ? '1' : '0');
-    div.id = 'mobile-detector';
-    div.style.display = 'none';
-    document.body.appendChild(div);
-})();
-</script>
-""", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════
 #  服务初始化
@@ -80,21 +69,21 @@ def init_services():
         "feedback": FeedbackService(sf, price_svc),
     }
 
-# 仅首次加载时清除缓存（避免每次 rerun 销毁服务状态）
+# 仅首次加载时清除缓存
 if "_svc_init" not in st.session_state:
     st.cache_resource.clear()
     st.session_state["_svc_init"] = True
 services = init_services()
 
 def _safe_toast(msg, icon=None):
-    """安全 toast（兼容旧版 Streamlit）"""
+    """安全 toast"""
     try:
         st.toast(msg, icon=icon)
     except AttributeError:
-        pass  # 旧版无 toast，静默跳过
+        pass
 
 def _invalidate_sidebar():
-    """标脏侧边栏缓存，下次渲染时自动刷新"""
+    """标脏侧边栏缓存"""
     st.session_state["_price_ver"] = st.session_state.get("_price_ver", 0) + 1
 
 # ═══════════════════════════════════════════════════════════
@@ -111,7 +100,7 @@ if "_auto_connected" not in st.session_state:
     except Exception as _e:
         _safe_toast(f"⚠️ 实时行情连接异常: {_e}", icon="⚠️")
 
-# 🆕 启动时检查推荐回测结果
+# 启动时检查推荐回测结果
 if "_feedback_checked" not in st.session_state:
     st.session_state["_feedback_checked"] = True
     fb = services["feedback"].check_outcomes()
@@ -120,17 +109,14 @@ if "_feedback_checked" not in st.session_state:
 
 
 # ═══════════════════════════════════════════════════════
-#  静默后台刷新（仅在数据过期时触发一次 rerun，防抖 45s）
+#  静默后台刷新（数据过期时触发，防抖 45s）
 # ═══════════════════════════════════════════════════════
 _real_enabled = services["price"].is_using_real_data
 if _real_enabled:
     last_up = services["price"].last_update_time
     now_ts = datetime.now()
     last_rerun_ts = st.session_state.get("_last_data_rerun")
-    if last_up:
-        data_age = (now_ts - last_up).total_seconds()
-    else:
-        data_age = 999
+    data_age = (now_ts - last_up).total_seconds() if last_up else 999
     need_rerun = data_age > 30
     can_rerun = (last_rerun_ts is None or (now_ts - last_rerun_ts).total_seconds() > 45)
     if need_rerun and can_rerun:
@@ -141,51 +127,51 @@ if _real_enabled:
 
 
 # ═══════════════════════════════════════════════════════════
-#  缓存装饰器 — v3.3 优化TTL + 批量预取
+#  缓存装饰器
 # ═══════════════════════════════════════════════════════════
-@st.cache_data(ttl=300, show_spinner=False)  # 🆕 60s→300s，侧边栏不需要秒级刷新
+@st.cache_data(ttl=300, show_spinner=False)
 def get_cached_prices():
     return services["price"].fetch_all_current_prices()
 
-@st.cache_data(ttl=300, show_spinner=False)  # 🆕 60s→300s
+@st.cache_data(ttl=300, show_spinner=False)
 def get_cached_summaries():
     return services["price"].get_all_price_summaries()
 
-@st.cache_data(ttl=600, show_spinner="🧠 多因子引擎分析中...")  # 🆕 300s→600s，仪表盘不需要实时推荐
+@st.cache_data(ttl=600, show_spinner="🧠 多因子引擎分析中...")
 def get_cached_recommendations():
     return services["recommendation"].get_top_opportunities(top_n=5)
 
-@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
+@st.cache_data(ttl=120, show_spinner=False)
 def get_inventory_summary():
     return services["inventory"].get_inventory_summary()
 
-@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
+@st.cache_data(ttl=120, show_spinner=False)
 def get_profit_summary(days=30):
     return services["inventory"].get_profit_summary(days=days)
 
-@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
+@st.cache_data(ttl=120, show_spinner=False)
 def get_all_inventory():
     return services["inventory"].get_all_inventory()
 
-@st.cache_data(ttl=120, show_spinner=False)  # 🆕 60s→120s
+@st.cache_data(ttl=120, show_spinner=False)
 def get_transactions(limit=100):
     return services["inventory"].get_transaction_history(limit=limit)
 
-@st.cache_data(ttl=600, show_spinner=False)  # 🆕 300s→600s
+@st.cache_data(ttl=600, show_spinner=False)
 def get_history_cached(metal, days):
     df, _src = services["price"].get_historical_prices(metal, days=days)
     return df
 
-@st.cache_data(ttl=600, show_spinner=False)  # 🆕 300s→600s，新闻不需要频繁刷新
+@st.cache_data(ttl=600, show_spinner=False)
 def get_news_headlines(limit=8):
     return services["news"].get_market_headlines(limit=limit)
 
 
 # ═══════════════════════════════════════════════════════════
-#  侧边栏数据缓存（版本号驱动，避免时间TTL盲区）
+#  侧边栏数据缓存
 # ═══════════════════════════════════════════════════════════
 def _sidebar_fetch():
-    """统一获取侧边栏价格+快讯，结果存入session_state"""
+    """统一获取侧边栏价格+快讯"""
     try:
         st.session_state["_sidebar_prices"] = get_cached_prices()
     except Exception:
@@ -196,7 +182,6 @@ def _sidebar_fetch():
         st.session_state["_sidebar_news"] = []
     st.session_state["_sidebar_ver"] = st.session_state.get("_price_ver", 0)
 
-# 首次或版本过期或上次为空时刷新
 _cur_ver = st.session_state.get("_price_ver", 0)
 _cached_ver = st.session_state.get("_sidebar_ver", -1)
 _sidebar_prices_raw = st.session_state.get("_sidebar_prices")
@@ -211,16 +196,17 @@ _sidebar_news = st.session_state.get("_sidebar_news", [])
 #  侧边栏
 # ═══════════════════════════════════════════════════════════
 with st.sidebar:
-    st.markdown(
-        '<div style="text-align:center;padding:8px 0 12px 0;">'
-        '<span style="font-size:1.3rem;font-weight:800;'
-        'background:linear-gradient(90deg,#C8923A,#D4832A);'
-        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;'
-        'background-clip:text;">🔩 Metal AI Trading</span>'
-        '<div style="font-size:0.72rem;color:#9CA3AF;margin-top:2px;">v3.4 统计增强版</div></div>',
-        unsafe_allow_html=True,
-    )
+    # ── Logo ──
+    st.markdown(f"""
+    <div style="text-align:center;padding:6px 0 14px 0;">
+        <div style="font-size:1.2rem;font-weight:800;
+            background:{PALETTE['gradient']};
+            -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+            background-clip:text;">🔩 Metal AI Trading</div>
+        <div style="font-size:0.68rem;color:{PALETTE['text_muted']};margin-top:2px;">v4.0 多因子智能分析</div>
+    </div>""", unsafe_allow_html=True)
 
+    # ── 导航 ──
     page = st.radio(
         "📋 导航",
         ["📊 仪表盘", "💰 实时行情", "📦 库存管理", "🤖 AI推荐",
@@ -231,15 +217,14 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 数据源
-    st.caption("📡 数据源")
+    # ── 数据源状态 ──
+    sidebar_section_title("📡 数据源")
     real_enabled = services["price"].is_using_real_data
     if real_enabled:
-        st.success("⚡ SHFE 实时行情")
+        datasource_badge(True, "SHFE 实时行情")
         col_r1, col_r2 = st.columns(2)
         with col_r1:
-            if st.button("🔄 刷新价格", width='stretch',
-                         help="获取最新SHFE报价+5分钟K线"):
+            if st.button("🔄 刷新", width='stretch', help="获取最新SHFE报价"):
                 with st.spinner("刷新中..."):
                     refresh_r = services["price"].refresh_realtime_prices()
                     if refresh_r["success"]:
@@ -256,7 +241,7 @@ with st.sidebar:
                 _invalidate_sidebar()
                 st.rerun()
     else:
-        st.warning("📀 本地模拟数据")
+        datasource_badge(False, "本地模拟数据")
         if st.button("📡 连接实时行情", width='stretch',
                      help="从上海期货交易所获取实时数据（需国内网络）"):
             st.info("正在连接上海期货交易所...")
@@ -271,17 +256,18 @@ with st.sidebar:
                 time.sleep(0.5)
                 st.rerun()
             else:
-                st.warning(f"连接失败: {result.get('message', '未知错误')}\n\n请确认网络可访问 hq.sinajs.cn（国内网络）")
+                st.warning(f"连接失败: {result.get('message', '未知错误')}\n\n请确认网络可访问 hq.sinajs.cn")
 
-    # LLM
-    st.caption("🧠 AI 状态")
+    # ── AI 状态 ──
+    sidebar_section_title("🧠 AI 状态")
     if services.get("llm") and services["llm"].available:
-        st.success("DeepSeek 已连接")
+        st.markdown(f'<div class="status-badge" style="background:{PALETTE["success_bg"]};color:{PALETTE["success"]};">✅ DeepSeek 已连接</div>', unsafe_allow_html=True)
     else:
-        st.warning("未配置 API Key")
+        st.markdown(f'<div class="status-badge" style="background:{PALETTE["warning_bg"]};color:{PALETTE["warning"]};">⚠️ 未配置 API Key</div>', unsafe_allow_html=True)
 
+    # ── 快速行情 ──
     st.markdown("---")
-    st.caption("⚡ 快速行情")
+    sidebar_section_title("⚡ 快速行情")
     try:
         raw_prices = services["price"].fetch_all_current_prices()
         shown = 0
@@ -289,99 +275,76 @@ with st.sidebar:
             if not p or not p.get("price"):
                 continue
             shown += 1
-            chg = p.get('change_pct', 0)
-            sign = "+" if chg >= 0 else ""
-            color = "#10B981" if chg >= 0 else "#EF4444"
-            st.markdown(
-                f'<div style="display:flex;justify-content:space-between;'  
-                f'font-size:0.82rem;margin:3px 0;">'
-                f'{p["metal_type"]}</span>'
-                f'<span style="color:#1A1D26;font-weight:600;">¥{p["price"]:,.0f}</span>'
-                f'<span style="color:{color};font-weight:600;">{sign}{chg:.2f}%</span></div>',
-                unsafe_allow_html=True,
-            )
+            sidebar_price_row(p["metal_type"], p["price"], p.get('change_pct', 0))
         if shown == 0:
             st.caption("（数据加载中...）")
     except Exception as e:
         st.caption(f"⚠ {e}")
 
+    # ── 金属快讯 ──
     st.markdown("---")
-    st.caption("📰 金属快讯")
+    sidebar_section_title("📰 金属快讯")
     try:
         if _sidebar_news:
             for h in _sidebar_news[:5]:
-                content = h['content']
-                if len(content) > 50:
-                    content = content[:48] + ".."
-                st.markdown(
-                    f'<div style="font-size:0.72rem;color:#1A1D26;padding:1px 0;'
-                    f'border-left:2px solid #C8923A;padding-left:6px;margin:2px 0;'
-                    f'line-height:1.3;">{content}</div>',
-                    unsafe_allow_html=True,
-                )
+                time_str = h.get('time', '')
+                # 提取 HH:MM 部分
+                if time_str and len(time_str) > 5:
+                    # 尝试提取时间部分
+                    try:
+                        parts = time_str.replace('+08:00', '').strip()
+                        if ' ' in parts:
+                            time_str = parts.split(' ')[1][:5]  # HH:MM
+                        else:
+                            time_str = time_str[-8:-3] if len(time_str) > 8 else time_str
+                    except Exception:
+                        pass
+                sidebar_news_item(h['content'], time_str)
         else:
             st.caption("（暂无快讯）")
     except Exception:
         pass
 
+    # ── 底部工具 ──
     st.markdown("---")
-    # 数据更新时间 & 自动刷新（仅展示，不触发 rerun）
+    sidebar_section_title("🔧 工具")
     if real_enabled:
         last_up = services["price"].last_update_time
         if last_up:
             elapsed = (datetime.now() - last_up).total_seconds()
             age_str = f"{elapsed:.0f}秒前" if elapsed < 120 else f"{elapsed/60:.0f}分钟前"
-            st.caption(f"📡 上海期货交易所")
             st.caption(f"⏱️ 更新: {last_up.strftime('%H:%M:%S')} ({age_str})")
-        else:
-            st.caption(f"📡 数据源: SHFE")
-
-        # 自动刷新开关（控制 JS 轮询）
         auto_key = "_auto_refresh"
         if auto_key not in st.session_state:
             st.session_state[auto_key] = True
-        auto_refresh = st.checkbox("⏱️ 每120秒自动刷新", value=st.session_state[auto_key],
+        auto_refresh = st.checkbox("⏱️ 自动刷新", value=st.session_state[auto_key],
                                    key="auto_refresh_cb")
         st.session_state[auto_key] = auto_refresh
-    else:
-        st.caption(f"📀 数据源: 本地模拟")
 
-    col_r, col_v = st.columns([3, 2])
-    with col_r:
-        if st.button("🔄 强制刷新", width='stretch'):
-            st.cache_data.clear()
-            _invalidate_sidebar()
-            st.rerun()
-        # 🆕 轻量刷新按钮（仅刷新价格+快讯，不重算AI，不跳页）
-        lite_clicked = st.button("LITE", width='stretch',
-                                 key="_lite_refresh",
-                                 help="轻量刷新（仅更新侧边栏数据）")
-        if lite_clicked:
-            _invalidate_sidebar()
-            st.rerun()
-    with col_v:
-        st.caption(datetime.now().strftime("%H:%M"))
+    if st.button("🔄 强制刷新", width='stretch'):
+        st.cache_data.clear()
+        _invalidate_sidebar()
+        st.rerun()
+    st.caption(f"🕐 {datetime.now().strftime('%H:%M')}")
 
 
-# ── 自动刷新注入（每120秒仅更新侧边栏数据，不清缓存不重算AI） ──
+# ── 自动刷新 JS ──
 if real_enabled and st.session_state.get("_auto_refresh", True):
-    st.markdown(
-        """
-        <script>
-        if (!window._metalAutoRefresh) {
-            window._metalAutoRefresh = setInterval(function() {
-                var btns = window.parent.document.querySelectorAll('button');
-                for (var i = 0; i < btns.length; i++) {
-                    if (btns[i].textContent.indexOf('LITE') >= 0) {
-                        btns[i].click(); break;
-                    }
+    st.markdown("""
+    <script>
+    if (!window._metalAutoRefresh) {
+        window._metalAutoRefresh = setInterval(function() {
+            var btns = window.parent.document.querySelectorAll('button');
+            for (var i = 0; i < btns.length; i++) {
+                if (btns[i].textContent.indexOf('🔄 强制刷新') >= 0) {
+                    btns[i].click(); break;
                 }
-            }, 120000);
-        }
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
+            }
+        }, 120000);
+    }
+    </script>
+    """, unsafe_allow_html=True)
+
 
 # ═══════════════════════════════════════════════════════════
 #  📊 仪表盘
@@ -394,15 +357,14 @@ if page == "📊 仪表盘":
     mobile_kpi_row([
         ("库存总价值", f"¥{inv_s['total_value']:,.0f}", f"{inv_s['profit_pct']:+.1f}%", "normal", "💎"),
         ("浮动盈亏", f"¥{inv_s['total_profit']:,.0f}", None, "normal", "📈"),
-        ("30天利润", f"¥{prof['total_profit']:,.0f}", f"{prof['total_sell_transactions']}笔交易", "normal", "🏆"),
-        ("库存品类", str(inv_s['total_items']), f"{len(inv_s.get('by_metal', {}))}种金属", "normal", "📦"),
+        ("30天利润", f"¥{prof['total_profit']:,.0f}", f"{prof['total_sell_transactions']}笔", "normal", "🏆"),
+        ("库存品类", str(inv_s['total_items']), f"{len(inv_s.get('by_metal', {}))}种", "normal", "📦"),
     ], cols_per_row=2)
 
-    st.markdown("---")
-
+    # ── 行情热力 + 库存分布 ──
     left, right = st.columns(2)
     with left:
-        section_header("🔥 行情热力", "各金属日涨跌幅一览")
+        section_header("🔥 行情热力", "各金属日涨跌幅")
         summaries = get_cached_summaries()
         if summaries:
             df_s = pd.DataFrame(summaries)
@@ -410,12 +372,12 @@ if page == "📊 仪表盘":
                 df_s, x='metal_type', y='change_day',
                 color='change_day',
                 color_continuous_scale=[
-                    (0, '#EF4444'), (0.45, '#9CA3AF'), (0.5, '#6B7280'),
-                    (0.55, '#9CA3AF'), (1, '#10B981')
+                    (0, PALETTE["danger"]), (0.45, '#D1D5DB'), (0.5, PALETTE["text_muted"]),
+                    (0.55, '#D1D5DB'), (1, PALETTE["success"])
                 ],
                 labels={'change_day': '涨跌%', 'metal_type': ''},
             )
-            fig.update_traces(marker=dict(line=dict(width=0)))
+            fig.update_traces(marker=dict(line=dict(width=0), cornerradius=4))
             styled_plotly(fig)
             fig.update_layout(height=320, showlegend=False)
             st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
@@ -428,14 +390,10 @@ if page == "📊 仪表盘":
                 {"金属": k, "市值": v["total_value"]}
                 for k, v in bm.items()
             ])
-            colors_pie = [
-                '#C8923A', '#D4832A', '#B07E30', '#9C6E28',
-                '#F59E0B', '#D4832A', '#A07030', '#CD853F',
-            ]
-            fig = px.pie(
-                df_pie, values='市值', names='金属',
-                color_discrete_sequence=colors_pie,
-            )
+            colors_pie = ['#C8923A', '#D4832A', '#B07E30', '#9C6E28',
+                          '#F59E0B', '#D4832A', '#A07030', '#CD853F']
+            fig = px.pie(df_pie, values='市值', names='金属',
+                         color_discrete_sequence=colors_pie)
             fig.update_traces(
                 textposition='inside', textinfo='percent+label',
                 textfont=dict(size=12, color='#FFFFFF'),
@@ -447,12 +405,10 @@ if page == "📊 仪表盘":
         else:
             empty_state("暂无库存数据", "📦")
 
+    # ── AI 推荐 ──
     st.markdown("---")
-
-    section_header("🤖 AI 智能推荐", "v3.4 多因子分析 · 点击「AI推荐」页面查看详情")
-    # 🆕 仪表盘不再触发全量分析，仅显示最近缓存结果或跳转提示
+    section_header("🤖 AI 智能推荐", "v4.0 多因子分析 · 点击「AI推荐」查看详情")
     try:
-        # 尝试从 session_state 读取最近一次AI分析结果（由AI推荐页写入）
         latest_recs = st.session_state.get("_latest_recs")
         if latest_recs:
             rc1, rc2 = st.columns(2)
@@ -473,40 +429,40 @@ if page == "📊 仪表盘":
     except Exception:
         st.info("💡 切换到「🤖 AI推荐」页面运行多因子分析引擎", icon="🧠")
 
+    # ── 最近交易 ──
     st.markdown("---")
-    section_header("📋 最近交易", "")
-    txns = get_transactions(5)
-    if txns:
-        df_txn = pd.DataFrame(txns)[[
-            'date', 'type', 'metal', 'quantity_kg',
-            'price_per_kg', 'total', 'profit',
-        ]]
-        df_txn.columns = ['日期', '类型', '金属', '数量kg', '单价', '总额', '利润']
-        st.dataframe(df_txn, width='stretch', hide_index=True)
-    else:
-        empty_state("暂无交易记录", "📝")
+    left2, right2 = st.columns([3, 2])
+    with left2:
+        section_header("📋 最近交易", "")
+        txns = get_transactions(5)
+        if txns:
+            df_txn = pd.DataFrame(txns)[[
+                'date', 'type', 'metal', 'quantity_kg',
+                'price_per_kg', 'total', 'profit',
+            ]]
+            df_txn.columns = ['日期', '类型', '金属', '数量kg', '单价', '总额', '利润']
+            st.dataframe(df_txn, width='stretch', hide_index=True)
+        else:
+            empty_state("暂无交易记录", "📝")
 
-    st.markdown("---")
-    section_header("📰 金属快讯", "上海金属网 · 最新行情动态")
-    headlines = get_news_headlines(10)
-    if headlines:
-        for h in headlines:
-            content = h['content']
-            time_str = h.get('time', '')
-            if time_str:
-                time_str = time_str[-8:] if len(time_str) > 8 else time_str
-            st.markdown(
-                f'<div style="display:flex;align-items:flex-start;padding:4px 0;'
-                f'border-bottom:1px solid #1F2937;font-size:0.82rem;">'
-                f'<span style="color:#C8923A;min-width:52px;font-weight:600;'
-                f'font-size:0.72rem;">{time_str}</span>'
-                f'<span style="color:#1A1D26;flex:1;">{content}</span></div>',
-                unsafe_allow_html=True,
-            )
-    else:
-        empty_state("暂无快讯数据", "📰")
+    with right2:
+        section_header("📰 金属快讯", "上海金属网")
+        headlines = get_news_headlines(8)
+        if headlines:
+            for h in headlines:
+                time_str = h.get('time', '')
+                if time_str:
+                    try:
+                        parts = time_str.replace('+08:00', '').strip()
+                        if ' ' in parts:
+                            time_str = parts.split(' ')[1][:5]
+                    except Exception:
+                        time_str = time_str[-8:-3] if len(time_str) > 8 else time_str
+                news_item_card(h['content'], time_str)
+        else:
+            empty_state("暂无快讯数据", "📰")
 
-    # 🆕 v3.4 诊断面板（定位全"观望"根因）
+    # 诊断面板
     with st.expander("🔧 引擎诊断", expanded=False):
         st.caption("数据源检查 & 指标抽样")
         try:
@@ -514,13 +470,12 @@ if page == "📊 仪表盘":
             for mt in list(METAL_TYPES.keys())[:4]:
                 df, src = services["price"].get_historical_prices(mt, 120)
                 ind = services["recommendation"]._compute_indicators(df['price'].values)
-                # 🆕 跑一遍完整分析拿综合分和背离分
                 result = services["recommendation"].analyze_and_recommend(mt, save_to_db=False)
                 ta = result.get('trend_analysis', {})
                 st.markdown(
-                    f"**{mt}** | 数据源:`{src}` | 数据点:`{ind['n']}` | "
-                    f"综合分:`{ta.get('composite_score','?')}` | "
-                    f"背离分:`{ta.get('divergence_score','?')}` | "
+                    f"**{mt}** | 源:`{src}` | 点:`{ind['n']}` | "
+                    f"综合:`{ta.get('composite_score','?')}` | "
+                    f"背离:`{ta.get('divergence_score','?')}` | "
                     f"决策:`{result['action']}`({result['confidence']}) | "
                     f"RSI:`{ind['rsi']:.1f}` | ADX:`{ind.get('adx',15):.0f}`"
                 )
@@ -543,7 +498,19 @@ elif page == "💰 实时行情":
             'trend': '趋势', 'support': '支撑', 'resistance': '阻力',
             'volatility': '波动率%',
         })
-        st.dataframe(df, width='stretch', hide_index=True)
+        # 用条件格式化的 dataframe
+        st.dataframe(df, width='stretch', hide_index=True,
+                     column_config={
+                         "日涨跌%": st.column_config.NumberColumn(format="%.2f%%"),
+                         "周涨跌%": st.column_config.NumberColumn(format="%.2f%%"),
+                         "月涨跌%": st.column_config.NumberColumn(format="%.2f%%"),
+                         "现价": st.column_config.NumberColumn(format="¥%,.0f"),
+                         "MA7": st.column_config.NumberColumn(format="¥%,.0f"),
+                         "MA30": st.column_config.NumberColumn(format="¥%,.0f"),
+                         "支撑": st.column_config.NumberColumn(format="¥%,.0f"),
+                         "阻力": st.column_config.NumberColumn(format="¥%,.0f"),
+                         "波动率%": st.column_config.NumberColumn(format="%.2f%%"),
+                     })
 
     st.markdown("---")
     section_header("🔍 金属详情", "选择金属查看完整技术指标")
@@ -555,7 +522,6 @@ elif page == "💰 实时行情":
         if s:
             chg_day = s['change_day']
             chg_color = "normal" if chg_day >= 0 else "inverse"
-            # 统一使用 mobile_kpi_row：桌面端5列，移动端2列
             mobile_kpi_row([
                 ("💰 当前价格", f"¥{s['current_price']:,.0f}", f"{s['change_day']:+.2f}%", chg_color, sel),
                 ("周涨跌", f"{s['change_week']:+.2f}%", None, "normal", "📅"),
@@ -564,7 +530,6 @@ elif page == "💰 实时行情":
                 ("趋势", s['trend'], None, "normal", "📈" if s['trend'] == "上涨" else "📉"),
             ], cols_per_row=2)
             st.caption(f"MA7: ¥{s['ma7']:,.0f} | MA30: ¥{s['ma30']:,.0f} | 支撑: ¥{s['support']:,.0f} | 阻力: ¥{s['resistance']:,.0f}")
-
             st.caption(f"数据源: {s['source']} | 更新: {s.get('timestamp', '')}")
 
 
@@ -594,25 +559,29 @@ elif page == "📦 库存管理":
                 'profit_loss': '盈亏', 'profit_loss_pct': '盈亏%',
                 'storage_location': '仓库', 'quality_grade': '品质',
             })
-            st.dataframe(df_inv, width='stretch', hide_index=True)
+            st.dataframe(df_inv, width='stretch', hide_index=True,
+                         column_config={
+                             "成本价": st.column_config.NumberColumn(format="¥%,.2f"),
+                             "市场价": st.column_config.NumberColumn(format="¥%,.2f"),
+                             "总成本": st.column_config.NumberColumn(format="¥%,.0f"),
+                             "市值": st.column_config.NumberColumn(format="¥%,.0f"),
+                             "盈亏": st.column_config.NumberColumn(format="¥%,.0f"),
+                             "盈亏%": st.column_config.NumberColumn(format="%.1f%%"),
+                         })
 
             st.markdown("---")
             section_header("💰 卖出库存", "")
-
             inv_map = {
                 f"#{i['id']} {i['metal_type']} {i['quantity_kg']}kg | 成本¥{i['avg_cost_price']}"
                 : i['id'] for i in inv
             }
             sel_inv = st.selectbox("选择库存条目", list(inv_map.keys()),
                                    label_visibility="collapsed")
-
             c1, c2, c3 = st.columns(3)
             qty = c1.number_input("卖出数量(kg)", min_value=0.1, step=100.0, value=100.0)
             price = c2.number_input("卖出单价(元/kg)", min_value=0.01, step=1.0, value=100.0)
             buyer = c3.text_input("买家名称")
-
             note = st.text_area("备注", key="inv_sell_notes", placeholder="交易备注...")
-
             if st.button("✅ 确认卖出", type="primary", width='stretch'):
                 r = services["inventory"].sell_inventory(
                     inv_map[sel_inv], qty, price, buyer, note
@@ -660,15 +629,14 @@ elif page == "🤖 AI推荐":
             st.cache_data.clear()
             st.rerun()
     with col_info:
-        st.caption("v3.4 14因子引擎 · Hurst指数 + 三峰背离 + Half-Kelly + DeepSeek AI")
+        st.caption("v4.0 14因子引擎 · Hurst指数 + 三峰背离 + Half-Kelly + DeepSeek AI")
 
     try:
         with st.spinner("🧠 多因子引擎分析中..."):
             opps = get_cached_recommendations()
-        # 🆕 保存到session_state，仪表盘可直接读取
         st.session_state["_latest_recs"] = opps
-        bc, sc = st.columns(2)
 
+        bc, sc = st.columns(2)
         with bc:
             st.markdown("#### 🟢 买入推荐")
             for i, rec in enumerate(opps.get("top_buy", [])[:5], 1):
@@ -709,6 +677,11 @@ elif page == "🤖 AI推荐":
                 df_r[['metal_type', '操作', 'confidence', 'current_price',
                       'expected_profit_pct', 'risk_level']],
                 width='stretch', hide_index=True,
+                column_config={
+                    "current_price": st.column_config.NumberColumn(format="¥%,.0f"),
+                    "confidence": st.column_config.NumberColumn(format="%.0f%%"),
+                    "expected_profit_pct": st.column_config.NumberColumn(format="%.1f%%"),
+                },
             )
 
         if services.get("llm") and services["llm"].available:
@@ -755,7 +728,7 @@ elif page == "📈 走势分析":
     fig.add_trace(go.Scatter(
         x=df['date'], y=df['price'], mode='lines',
         name=sel, line=dict(color='#C8923A', width=2.5),
-        fill='tozeroy', fillcolor='rgba(200,146,58,0.08)',
+        fill='tozeroy', fillcolor='rgba(200,146,58,0.06)',
     ))
     if len(df) >= 7:
         ma7 = df['price'].rolling(7).mean()
@@ -777,7 +750,6 @@ elif page == "📈 走势分析":
     )
     st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
 
-    # 走势统计：使用 mobile_kpi_row 统一布局
     chg = (df['price'].iloc[-1] - df['price'].iloc[0]) / df['price'].iloc[0] * 100
     mobile_kpi_row([
         ("现价", f"¥{df['price'].iloc[-1]:,.0f}", None, "normal", "💵"),
@@ -883,6 +855,11 @@ elif page == "📋 交易记录":
             df[['date', 'type', 'metal', 'quantity_kg', 'price_per_kg',
                 'total', 'profit', 'counterparty']],
             width='stretch', hide_index=True,
+            column_config={
+                "price_per_kg": st.column_config.NumberColumn(format="¥%,.2f"),
+                "total": st.column_config.NumberColumn(format="¥%,.0f"),
+                "profit": st.column_config.NumberColumn(format="¥%,.0f"),
+            },
         )
     else:
         empty_state("暂无交易记录", "📝")
@@ -1000,17 +977,16 @@ elif page == "📊 利润分析":
     inv = get_all_inventory()
     if inv:
         df_inv = pd.DataFrame(inv)
-
         fig = px.bar(
             df_inv, x='metal_type', y='profit_loss',
             color='profit_loss',
             color_continuous_scale=[
-                (0, '#EF4444'), (0.45, '#9CA3AF'), (0.5, '#6B7280'),
-                (0.55, '#9CA3AF'), (1, '#10B981')
+                (0, PALETTE["danger"]), (0.45, '#D1D5DB'), (0.5, PALETTE["text_muted"]),
+                (0.55, '#D1D5DB'), (1, PALETTE["success"])
             ],
             labels={'profit_loss': '浮动盈亏(元)', 'metal_type': '金属'},
         )
-        fig.update_traces(marker=dict(line=dict(width=0)))
+        fig.update_traces(marker=dict(line=dict(width=0), cornerradius=4))
         styled_plotly(fig)
         fig.update_layout(height=350, showlegend=False)
         st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
@@ -1019,6 +995,12 @@ elif page == "📊 利润分析":
             df_inv[['metal_type', 'quantity_kg', 'avg_cost_price',
                     'current_market_price', 'profit_loss', 'profit_loss_pct']],
             width='stretch', hide_index=True,
+            column_config={
+                "avg_cost_price": st.column_config.NumberColumn(format="¥%,.2f"),
+                "current_market_price": st.column_config.NumberColumn(format="¥%,.2f"),
+                "profit_loss": st.column_config.NumberColumn(format="¥%,.0f"),
+                "profit_loss_pct": st.column_config.NumberColumn(format="%.1f%%"),
+            },
         )
     else:
         empty_state("暂无库存", "📦")
@@ -1027,21 +1009,10 @@ elif page == "📊 利润分析":
     section_header("📈 投资回报率 (ROI)", "")
     inv_s = get_inventory_summary()
     if inv_s['total_cost'] > 0:
-        roi = inv_s['profit_pct']
-        roi_color = "#10B981" if roi >= 0 else "#EF4444"
-        st.markdown(
-            f'<div style="text-align:center;padding:20px;">'
-            f'<div style="font-size:0.85rem;color:#6B7280;margin-bottom:8px;">'
-            f'总投资回报率</div>'
-            f'<div style="font-size:2.2rem;font-weight:800;color:{roi_color};">'
-            f'{roi:+.2f}%</div>'
-            f'<div style="color:#9CA3AF;font-size:0.8rem;margin-top:4px;">'
-            f'目标: 30% | 当前: {roi:.2f}%</div></div>',
-            unsafe_allow_html=True,
-        )
-        st.progress(min(abs(roi) / 30, 1.0))
+        roi_display(inv_s['profit_pct'], target=30.0)
     else:
         empty_state("暂无投资数据", "💼")
+
 
 # ═══════════════════════════════════════════════════════════
 #  🧪 回测
@@ -1062,7 +1033,6 @@ elif page == "🧪 回测":
             ("7日均收益", f"{perf.get('avg_profit_7d', 0):+.2f}%", None, "normal", "📈"),
         ], cols_per_row=2)
 
-        # 按金属
         st.markdown("---")
         section_header("📊 按金属统计", "")
         if perf.get("by_metal"):
@@ -1073,34 +1043,15 @@ elif page == "🧪 回测":
             ])
             st.dataframe(df_m, width='stretch', hide_index=True)
 
-        # 最近结果
         st.markdown("---")
         section_header("📋 最近推荐结果", "绿色=正确，红色=错误")
         outcomes = services["feedback"].get_recent_outcomes(20)
         if outcomes:
             for o in outcomes:
-                correct = o.get("was_correct")
-                if correct is True:
-                    bg = "#ECFDF5"; border = "#10B981"; tag = "✅"
-                elif correct is False:
-                    bg = "#FEF2F2"; border = "#EF4444"; tag = "❌"
-                else:
-                    bg = "#F9FAFB"; border = "#D1D5DB"; tag = "⏳"
-                st.markdown(
-                    f'<div style="background:{bg};border-left:3px solid {border};'
-                    f'padding:8px 12px;margin:4px 0;border-radius:6px;'
-                    f'font-size:0.82rem;display:flex;justify-content:space-between;">'
-                    f'<span>{o["date"]} <b>{o["metal_type"]}</b> '
-                    f'{o["action"]}({o["confidence"]:.0%})</span>'
-                    f'<span>{tag} 3d:{o.get("outcome_3d","?")}% '
-                    f'7d:{o.get("outcome_7d","?")}% '
-                    f'30d:{o.get("outcome_30d","?")}%</span></div>',
-                    unsafe_allow_html=True,
-                )
+                backtest_outcome_card(o)
         else:
             empty_state("暂无评估结果", "🧪")
 
-        # 自学习状态
         st.markdown("---")
         section_header("🧠 自学习状态", "")
         if perf["accuracy"] < 45:
@@ -1110,6 +1061,7 @@ elif page == "🧪 回测":
         else:
             st.info(f"📊 当前准确率 {perf['accuracy']}%，继续积累数据中")
 
+
 # ═══════════════════════════════════════════════════════════
 #  底部
 # ═══════════════════════════════════════════════════════════
@@ -1117,17 +1069,14 @@ st.markdown("---")
 if services["price"].is_using_real_data:
     last_up = services["price"].last_update_time
     if last_up:
-        real_label = f"🟢 SHFE实时 · 更新于 {last_up.strftime('%H:%M:%S')}"
+        real_label = f"🟢 SHFE实时 · {last_up.strftime('%H:%M:%S')}"
     else:
         real_label = "🟢 SHFE实时行情"
 else:
     real_label = "🟡 本地模拟数据"
 st.markdown(
-    f'<div style="text-align:center;color:#9CA3AF;font-size:0.78rem;padding:4px 0;">'
-    f'🔩 Metal AI Trading System v3.4 · 14因子统计增强 · {real_label}'
+    f'<div style="text-align:center;color:{PALETTE["text_muted"]};font-size:0.74rem;padding:6px 0;">'
+    f'🔩 Metal AI Trading System v4.0 · 14因子统计增强 · {real_label}'
     '</div>',
     unsafe_allow_html=True,
 )
-
-# 移动端底部导航提示
-# (已移除)

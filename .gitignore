@@ -28,6 +28,10 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+nul
+
+# Pi agent
+.pi/
 
 # 密钥文件（防止误提交）
 *.pem
