@@ -293,8 +293,8 @@ with st.sidebar:
             )
         if shown == 0:
             st.caption("（数据加载中...）")
-    except Exception:
-        st.caption("（行情暂不可用）")
+    except Exception as e:
+        st.caption(f"⚠ {e}")
 
     st.markdown("---")
     st.caption("📰 金属快讯")
