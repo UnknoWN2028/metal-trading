@@ -185,10 +185,11 @@ def _sidebar_fetch():
         st.session_state.setdefault("_sidebar_news", [])
     st.session_state["_sidebar_ver"] = st.session_state.get("_price_ver", 0)
 
-# 首次或版本过期时刷新
+# 首次或版本过期或上次为空时刷新
 _cur_ver = st.session_state.get("_price_ver", 0)
 _cached_ver = st.session_state.get("_sidebar_ver", -1)
-if "_sidebar_prices" not in st.session_state or _cur_ver != _cached_ver:
+_sidebar_prices_raw = st.session_state.get("_sidebar_prices")
+if _sidebar_prices_raw is None or _cur_ver != _cached_ver or (isinstance(_sidebar_prices_raw, list) and len(_sidebar_prices_raw) == 0):
     _sidebar_fetch()
 
 _sidebar_prices = st.session_state.get("_sidebar_prices", [])
