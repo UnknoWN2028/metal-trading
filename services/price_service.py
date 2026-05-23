@@ -190,8 +190,9 @@ class MetalPriceService:
     #  SHFE真实数据获取
     # ============================================================
 
+
     def auto_connect(self) -> dict:
-        """启动时自动尝试连接SHFE（新浪实时行情）"""
+        """启动时自动尝试连接SHFE（akshare K线数据源）"""
         result = {"success": False, "message": "", "data": None}
         try:
             # 直接用实时行情刷新
@@ -226,81 +227,84 @@ class MetalPriceService:
             return result
 
     def refresh_spot_only(self) -> dict:
-        """秒级实时行情 — 直连新浪 HTTP API"""
+        """实时行情 — 从 akshare K线获取最新价格和涨跌幅
+
+        新浪 hq.sinajs.cn 自2024年后不再更新主力连续合约数据，
+        返回的历史价格和涨跌幅均错误，已废弃。
+        改用 akshare futures_main_sina 获取最新K线，
+        用最近两日收盘价计算当日涨跌幅。
+        """
         from config import METAL_TYPES
-        import urllib.request
-        import re
 
         try:
-            # 1) 收集合约代码
-            symbols = []
-            metal_by_code = {}  # 合约代码(大写) → 金属名
-            for metal, cfg in METAL_TYPES.items():
-                code = cfg.get('futures_code', '')
-                if code and not cfg.get('is_scrap'):
-                    symbols.append(code)
-                    metal_by_code[code.upper()] = metal
+            import akshare as ak
+        except ImportError:
+            return {"success": False, "message": "akshare 未安装"}
 
-            if not symbols:
-                return {"success": False, "message": "无可用合约"}
-
-            # 2) 直连新浪实时行情
-            url = "http://hq.sinajs.cn/list=" + ",".join(symbols)
-            req = urllib.request.Request(url)
-            req.add_header("Referer", "https://finance.sina.com.cn")
-            resp = urllib.request.urlopen(req, timeout=8)
-            raw_text = resp.read().decode("gbk")
-
-            if not raw_text or "hq_str_" not in raw_text:
-                return {"success": False, "message": "新浪无数据"}
-
-            # 3) 逐行解析
+        try:
             updated = 0
             ts_now = datetime.now()
-            for line in raw_text.strip().split("\n"):
-                m = re.match(r"var hq_str_(\w+)=\"(.+)\"", line)
-                if not m:
+
+            for metal, cfg in METAL_TYPES.items():
+                if cfg.get('is_scrap'):
                     continue
-                sym = m.group(1).upper()
-                fields = m.group(2).split(",")
-                metal = metal_by_code.get(sym)
-                if not metal:
-                    # 模糊匹配：去掉数字后缀
-                    base = re.sub(r'\d+$', '', sym)
-                    for code, mname in metal_by_code.items():
-                        if re.sub(r'\d+$', '', code) == base:
-                            metal = mname
-                            break
-                if not metal or len(fields) < 9:
+                code = cfg.get('futures_code')
+                if not code:
                     continue
 
-                # Sina 期货字段：
-                # 0:名称 1:今开 2:昨收 3:当前价 4:最高 5:最低
-                # 6:买价 7:卖价 8:成交量 9:成交额 10:持仓 ...
                 try:
-                    price = float(fields[3]) if fields[3] else 0
-                    prev = float(fields[2]) if fields[2] else 0
-                    high = float(fields[4]) if fields[4] else price * 1.005
-                    low = float(fields[5]) if fields[5] else price * 0.995
-                    vol = int(float(fields[8])) if len(fields) > 8 and fields[8] else 0
-                    chg = (price - prev) / prev * 100 if prev > 0 else 0
-                except (ValueError, IndexError):
+                    kline = ak.futures_main_sina(symbol=code)
+                    if kline is None or kline.empty or len(kline) < 2:
+                        continue
+
+                    # 探测收盘价列
+                    cols = {str(c).strip(): c for c in kline.columns}
+                    price_col = None
+                    for k, v in cols.items():
+                        if '收盘' in k or 'close' in k.lower():
+                            price_col = v
+                            break
+                    if price_col is None:
+                        continue
+
+                    cur_price = float(kline[price_col].iloc[-1])
+                    prev_price = float(kline[price_col].iloc[-2])
+
+                    if cur_price <= 0:
+                        continue
+
+                    chg = (cur_price - prev_price) / prev_price * 100 if prev_price > 0 else 0
+
+                    # 最高/最低/成交量
+                    last_row = kline.iloc[-1]
+                    high_col = next((v for k, v in cols.items() if '最高' in k or 'high' in k.lower()), None)
+                    low_col = next((v for k, v in cols.items() if '最低' in k or 'low' in k.lower()), None)
+                    vol_col = next((v for k, v in cols.items() if '成交' in k or 'volume' in k.lower()), None)
+
+                    high = float(last_row[high_col]) if high_col else cur_price * 1.005
+                    low = float(last_row[low_col]) if low_col else cur_price * 0.995
+                    vol = 0
+                    if vol_col:
+                        try:
+                            vol = int(float(last_row[vol_col]))
+                        except (ValueError, TypeError):
+                            pass
+
+                    self._real_prices[metal] = {
+                        "price": cur_price,
+                        "change_pct": round(chg, 2),
+                        "high": high,
+                        "low": low,
+                        "volume": vol,
+                        "timestamp": ts_now,
+                    }
+                    updated += 1
+
+                except Exception as e:
+                    logger.debug(f"refresh_spot {metal}: {e}")
                     continue
 
-                if price <= 0:
-                    continue
-
-                self._real_prices[metal] = {
-                    "price": price,
-                    "change_pct": round(chg, 2),
-                    "high": high,
-                    "low": low,
-                    "volume": vol,
-                    "timestamp": ts_now,
-                }
-                updated += 1
-
-            # 4) 废金属价格按比例推算
+            # 废金属价格按比例推算
             for metal, cfg in METAL_TYPES.items():
                 ref = cfg.get('ref_metal')
                 if cfg.get("is_scrap") and ref and ref in self._real_prices:
@@ -319,14 +323,14 @@ class MetalPriceService:
             if updated > 0:
                 self._last_update = ts_now
                 self._use_real = True
-                return {"success": True, "message": f"新浪实时 {updated} 品种",
+                self._history_cache.clear()
+                return {"success": True, "message": f"SHFE实时 {updated} 品种",
                         "updated": updated}
-            return {"success": False, "message": "无匹配"}
+            return {"success": False, "message": "无匹配数据"}
 
         except Exception as e:
             logger.warning(f"refresh_spot_only: {e}")
             return {"success": False, "message": str(e)[:80]}
-
     def refresh_realtime_prices(self) -> dict:
         """刷新实时价格（新浪实时行情 + 分钟K线）"""
         try:
