@@ -73,10 +73,6 @@ def init_services():
     }
 
 services = init_services()
-# 检测缓存的旧实例（缺少 _current_price 方法），自动刷新资源缓存
-if not hasattr(services["price"], "_current_price") or not callable(getattr(services["price"], "_current_price", None)):
-    st.cache_resource.clear()
-    services = init_services()
 
 def _safe_toast(msg, icon=None):
     """安全 toast（兼容旧版 Streamlit）"""
@@ -276,6 +272,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("⚡ 快速行情")
+    st.caption(f"⚡ DEBUG: count={len(_sidebar_prices)}, err={st.session_state.get("_sidebar_err","-")[:80]}")
     try:
         shown = 0
         for p in _sidebar_prices[:6]:
