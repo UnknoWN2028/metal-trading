@@ -79,6 +79,10 @@ def _safe_toast(msg, icon=None):
     except AttributeError:
         pass  # 旧版无 toast，静默跳过
 
+def _invalidate_sidebar():
+    """标脏侧边栏缓存，下次渲染时自动刷新"""
+    st.session_state["_price_ver"] = st.session_state.get("_price_ver", 0) + 1
+
 # ═══════════════════════════════════════════════════════════
 #  启动时自动连接实时数据源
 # ═══════════════════════════════════════════════════════════
@@ -169,10 +173,6 @@ def _sidebar_fetch():
     except Exception:
         st.session_state.setdefault("_sidebar_prices", [])
         st.session_state.setdefault("_sidebar_news", [])
-
-def _invalidate_sidebar():
-    """标脏侧边栏缓存，下次渲染时自动刷新"""
-    st.session_state["_price_ver"] = st.session_state.get("_price_ver", 0) + 1
 
 # 首次或版本过期时刷新
 _cur_ver = st.session_state.get("_price_ver", 0)
