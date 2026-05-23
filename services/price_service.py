@@ -530,6 +530,8 @@ class MetalPriceService:
                 df['date'] = pd.to_datetime(df['date'])
                 # 更新缓存为重采样后的日线
                 self._real_history[metal_type] = df
+                # 🆕 清除旧缓存，强制重新计算
+                self._history_cache.clear()
 
             cutoff = datetime.now() - timedelta(days=days)
             df = df[df['date'] >= cutoff]
