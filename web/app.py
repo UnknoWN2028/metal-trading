@@ -79,6 +79,8 @@ def init_services():
         "feedback": FeedbackService(sf, price_svc),
     }
 
+# Clear Streamlit resource cache (old service instances from stale .pyc)
+st.cache_resource.clear()
 services = init_services()
 
 def _safe_toast(msg, icon=None):
