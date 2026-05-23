@@ -13,7 +13,7 @@ from services.inventory_service import InventoryService
 from services.recommendation_service import RecommendationService
 from services.alert_service import AlertService
 from services.llm_service import LLMService
-from services.news_service import NewsService
+from services.feedback_service import FeedbackService
 from web.styles import (
     inject_css, kpi_card, section_header,
     confidence_indicator, empty_state, factor_scores_card,
@@ -68,6 +68,7 @@ def init_services():
         "session": sf,
         "llm": llm_svc,
         "news": NewsService(),
+        "feedback": FeedbackService(sf, price_svc),
     }
 
 services = init_services()
@@ -94,9 +95,15 @@ if "_auto_connected" not in st.session_state:
             _safe_toast(f"✅ {result['message']}")
         else:
             _safe_toast(f"⚠️ {result.get('message', 'SHFE连接失败')}")
-        # 🆕 轻量刷新：不清除所有缓存，仅刷新侧边栏
         _invalidate_sidebar()
         st.rerun()
+
+# 🆕 启动时检查推荐回测结果
+if "_feedback_checked" not in st.session_state:
+    st.session_state["_feedback_checked"] = True
+    fb = services["feedback"].check_outcomes()
+    if fb.get("checked", 0) > 0:
+        _safe_toast(f"🧪 已回测{fb['checked']}条历史推荐")
 
 
 # ═══════════════════════════════════════════════════════
@@ -201,7 +208,7 @@ with st.sidebar:
     page = st.radio(
         "📋 导航",
         ["📊 仪表盘", "💰 实时行情", "📦 库存管理", "🤖 AI推荐",
-         "📈 走势分析", "🔔 价格预警", "📋 交易记录", "👥 客户供应商", "📊 利润分析"],
+         "📈 走势分析", "🔔 价格预警", "📋 交易记录", "👥 客户供应商", "📊 利润分析", "🧪 回测"],
         label_visibility="collapsed",
         key="nav_page",
     )
@@ -1009,6 +1016,73 @@ elif page == "📊 利润分析":
         st.progress(min(abs(roi) / 30, 1.0))
     else:
         empty_state("暂无投资数据", "💼")
+
+# ═══════════════════════════════════════════════════════════
+#  🧪 回测
+# ═══════════════════════════════════════════════════════════
+elif page == "🧪 回测":
+    st.title("🧪 推荐回测")
+
+    perf = services["feedback"].get_performance()
+
+    if perf["total"] == 0:
+        st.info("📝 尚无回测数据。AI推荐每3天自动评估一次，"
+                 "积累足够数据后显示准确率和自学习效果。")
+    else:
+        mobile_kpi_row([
+            ("历史推荐", str(perf["total"]), None, "normal", "📋"),
+            ("准确率", f"{perf['accuracy']}%", None,
+             "normal" if perf['accuracy'] >= 50 else "inverse", "🎯"),
+            ("7日均收益", f"{perf.get('avg_profit_7d', 0):+.2f}%", None, "normal", "📈"),
+        ], cols_per_row=2)
+
+        # 按金属
+        st.markdown("---")
+        section_header("📊 按金属统计", "")
+        if perf.get("by_metal"):
+            df_m = pd.DataFrame([
+                {"金属": mt, "推荐数": d["total"],
+                 "准确率%": d["accuracy"], "7日均收益%": d["avg_profit"]}
+                for mt, d in perf["by_metal"].items()
+            ])
+            st.dataframe(df_m, width='stretch', hide_index=True)
+
+        # 最近结果
+        st.markdown("---")
+        section_header("📋 最近推荐结果", "绿色=正确，红色=错误")
+        outcomes = services["feedback"].get_recent_outcomes(20)
+        if outcomes:
+            for o in outcomes:
+                correct = o.get("was_correct")
+                if correct is True:
+                    bg = "#ECFDF5"; border = "#10B981"; tag = "✅"
+                elif correct is False:
+                    bg = "#FEF2F2"; border = "#EF4444"; tag = "❌"
+                else:
+                    bg = "#F9FAFB"; border = "#D1D5DB"; tag = "⏳"
+                st.markdown(
+                    f'<div style="background:{bg};border-left:3px solid {border};'
+                    f'padding:8px 12px;margin:4px 0;border-radius:6px;'
+                    f'font-size:0.82rem;display:flex;justify-content:space-between;">'
+                    f'<span>{o["date"]} <b>{o["metal_type"]}</b> '
+                    f'{o["action"]}({o["confidence"]:.0%})</span>'
+                    f'<span>{tag} 3d:{o.get("outcome_3d","?")}% '
+                    f'7d:{o.get("outcome_7d","?")}% '
+                    f'30d:{o.get("outcome_30d","?")}%</span></div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            empty_state("暂无评估结果", "🧪")
+
+        # 自学习状态
+        st.markdown("---")
+        section_header("🧠 自学习状态", "")
+        if perf["accuracy"] < 45:
+            st.warning(f"⚠️ 当前准确率 {perf['accuracy']}%，权重已向均匀分布微调15%")
+        elif perf["accuracy"] > 65:
+            st.success(f"✅ 当前准确率 {perf['accuracy']}%，权重表现良好无需调整")
+        else:
+            st.info(f"📊 当前准确率 {perf['accuracy']}%，继续积累数据中")
 
 # ═══════════════════════════════════════════════════════════
 #  底部

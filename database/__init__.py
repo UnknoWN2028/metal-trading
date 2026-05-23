@@ -82,18 +82,24 @@ class Recommendation(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     metal_type = Column(String(50), nullable=False, index=True)
-    action = Column(String(10), nullable=False)             # 买入/卖出/持有
-    confidence = Column(Float, default=0.0)                 # 置信度 0-1
-    suggested_quantity_kg = Column(Float, default=0.0)      # 建议数量
-    suggested_price = Column(Float, default=0.0)            # 建议价格
-    current_price = Column(Float, default=0.0)              # 当前价格
-    expected_profit_pct = Column(Float, default=0.0)        # 预期利润率
-    reason = Column(Text, default="")                       # 推荐理由
-    trend_analysis = Column(Text, default="")               # 趋势分析
-    risk_level = Column(String(10), default="中")            # 风险等级: 低/中/高
+    action = Column(String(10), nullable=False)
+    confidence = Column(Float, default=0.0)
+    suggested_quantity_kg = Column(Float, default=0.0)
+    suggested_price = Column(Float, default=0.0)
+    current_price = Column(Float, default=0.0)
+    expected_profit_pct = Column(Float, default=0.0)
+    reason = Column(Text, default="")
+    trend_analysis = Column(Text, default="")
+    risk_level = Column(String(10), default="中")
     created_at = Column(DateTime, default=datetime.now, index=True)
-    is_executed = Column(Boolean, default=False)            # 是否已执行
+    is_executed = Column(Boolean, default=False)
     executed_at = Column(DateTime, nullable=True)
+    # 🆕 回测字段
+    outcome_checked = Column(Boolean, default=False)    # 是否已检查结果
+    outcome_3d_pct = Column(Float, nullable=True)       # 3日后涨跌%
+    outcome_7d_pct = Column(Float, nullable=True)       # 7日后涨跌%
+    outcome_30d_pct = Column(Float, nullable=True)      # 30日后涨跌%
+    was_correct = Column(Boolean, nullable=True)        # 方向是否正确
 
     def __repr__(self):
         return f"<Recommendation {self.metal_type}: {self.action} (信心:{self.confidence:.0%})>"
