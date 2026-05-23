@@ -100,6 +100,14 @@ def _invalidate_sidebar():
 # ═══════════════════════════════════════════════════════════
 if "_auto_connected" not in st.session_state:
     st.session_state["_auto_connected"] = True
+    try:
+        _auto_result = services["price"].auto_connect()
+        if _auto_result.get("success"):
+            _safe_toast(f"✅ {_auto_result['message']}", icon="📡")
+        else:
+            _safe_toast(f"⚠️ 实时行情连接失败: {_auto_result.get('message', '')}", icon="📡")
+    except Exception as _e:
+        _safe_toast(f"⚠️ 实时行情连接异常: {_e}", icon="⚠️")
 
 # 🆕 启动时检查推荐回测结果
 if "_feedback_checked" not in st.session_state:
@@ -249,20 +257,19 @@ with st.sidebar:
         st.warning("📀 本地模拟数据")
         if st.button("📡 连接实时行情", width='stretch',
                      help="从上海期货交易所获取实时数据（需国内网络）"):
-            import signal
             st.info("正在连接上海期货交易所...")
             try:
-                result = services["price"].try_fetch_real()
+                result = services["price"].auto_connect()
             except Exception as e:
-                result = {"success": False, "message": f"网络超时: {e}"}
+                result = {"success": False, "message": f"连接异常: {e}"}
             if result["success"]:
-                st.success(result["message"])
+                st.success(f"✅ {result['message']}")
                 st.cache_data.clear()
                 _invalidate_sidebar()
                 time.sleep(0.5)
                 st.rerun()
             else:
-                st.warning("Streamlit Cloud 服务器在海外，无法连接国内行情")
+                st.warning(f"连接失败: {result.get('message', '未知错误')}\n\n请确认网络可访问 hq.sinajs.cn（国内网络）")
 
     # LLM
     st.caption("🧠 AI 状态")
