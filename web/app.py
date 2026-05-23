@@ -267,6 +267,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("⚡ 快速行情")
+    st.caption(f"⚡ DEBUG: sidebar_prices count={len(_sidebar_prices)}, ver={st.session_state.get("_price_ver",0)}, cached={st.session_state.get("_sidebar_ver",-1)}")
     try:
         shown = 0
         for p in _sidebar_prices[:6]:
