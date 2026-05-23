@@ -23,6 +23,12 @@ from web.styles import (
     PLOTLY_FAST_CONFIG,
 )
 import pandas as pd
+# Force fresh import on Streamlit Cloud (clear stale .pyc caches)
+import importlib, sys
+for mod in list(sys.modules):
+    if 'services' in mod or 'database' in mod or 'config' in mod:
+        del sys.modules[mod]
+importlib.invalidate_caches()
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
