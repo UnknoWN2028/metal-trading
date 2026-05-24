@@ -690,23 +690,27 @@ class MetalPriceService:
 
                 if state == 0:  # trending_up
                     drift = vol * 0.6
-                    ar = 0.3 * (prices[i-1] - prices[max(0, i-2)]) if i >= 2 else 0
-                    prices[i] = prices[i-1] * (1 + drift + noise + ar)
+                    ar = 0.3 * (prices[i-1] - prices[max(0, i-2)]) / (prices[i-1] + 1e-10) if i >= 2 else 0
+                    change = np.clip(drift + noise + ar, -0.15, 0.15)
+                    prices[i] = prices[i-1] * (1 + change)
                 elif state == 1:  # trending_down
                     drift = -vol * 0.5
-                    ar = 0.25 * (prices[i-1] - prices[max(0, i-2)]) if i >= 2 else 0
-                    prices[i] = prices[i-1] * (1 + drift + noise + ar)
+                    ar = 0.25 * (prices[i-1] - prices[max(0, i-2)]) / (prices[i-1] + 1e-10) if i >= 2 else 0
+                    change = np.clip(drift + noise + ar, -0.15, 0.15)
+                    prices[i] = prices[i-1] * (1 + change)
                 elif state == 2:  # ranging
-                    prices[i] = prices[i-1] * (1 + noise * 0.7)
+                    change = np.clip(noise * 0.7, -0.10, 0.10)
+                    prices[i] = prices[i-1] * (1 + change)
                 else:  # mean_reverting
                     # 均值回归：向MA20回归
                     lookback = min(i, 20)
                     if lookback > 0:
                         ma = np.mean(prices[max(0, i-lookback):i])
-                        revert = 0.02 * (ma - prices[i-1]) / prices[i-1]
+                        revert = 0.02 * (ma - prices[i-1]) / (prices[i-1] + 1e-10)
                     else:
                         revert = 0
-                    prices[i] = prices[i-1] * (1 + revert + noise)
+                    change = np.clip(revert + noise, -0.12, 0.12)
+                    prices[i] = prices[i-1] * (1 + change)
 
         # 确保价格为正数
         prices = np.maximum(prices, base * 0.5)

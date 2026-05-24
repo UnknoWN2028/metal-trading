@@ -163,4 +163,33 @@ class Customer(Base):
 def init_db():
     """初始化数据库，创建所有表"""
     Base.metadata.create_all(engine)
-    print("✅ 数据库初始化完成")
+    # 自动迁移：为已存在的表添加缺失列
+    _migrate_add_columns()
+
+
+def _migrate_add_columns():
+    """自动检测并添加缺失的列"""
+    from sqlalchemy import text, inspect
+    inspector = inspect(engine)
+    migrations = {
+        "recommendations": [
+            ("outcome_checked", "BOOLEAN", "0"),
+            ("outcome_3d_pct", "FLOAT", None),
+            ("outcome_7d_pct", "FLOAT", None),
+            ("outcome_30d_pct", "FLOAT", None),
+            ("was_correct", "BOOLEAN", None),
+        ],
+    }
+    with engine.connect() as conn:
+        for table_name, columns in migrations.items():
+            try:
+                existing = {c["name"] for c in inspector.get_columns(table_name)}
+                for col_name, col_type, default_val in columns:
+                    if col_name not in existing:
+                        sql = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"
+                        if default_val is not None:
+                            sql += f" DEFAULT {default_val}"
+                        conn.execute(text(sql))
+                        conn.commit()
+            except Exception:
+                pass

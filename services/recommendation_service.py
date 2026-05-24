@@ -490,12 +490,14 @@ class RecommendationService:
 
     def _compute_indicators(self, prices: np.ndarray) -> dict:
         """一次性计算所有技术指标，避免重复遍历 (v3.3 优化：向量化EMA)"""
-        # 防御：确保prices是1D数组
+        # 防御：确保prices是1D数组，移除NaN/Inf
         prices = np.asarray(prices).ravel()
+        prices = prices[np.isfinite(prices)]
         n = len(prices)
         if n < 2:
             return self._empty_indicators()
-        returns = np.diff(prices) / prices[:-1]
+        with np.errstate(invalid='ignore', divide='ignore'):
+            returns = np.diff(prices) / (prices[:-1] + 1e-10)
 
         # ── 均线 (使用numpy卷积，比循环快) ──
         ma7 = float(np.mean(prices[-7:]))
@@ -524,12 +526,16 @@ class RecommendationService:
         bb_upper = bb_mid + 2 * bb_std
         bb_lower = bb_mid - 2 * bb_std
 
-        # ── 线性回归趋势斜率 ──
+        # ── 线性回归趋势斜率（SVD fallback 防御） ──
         window = min(n, 30)
         x = np.arange(window)
         y = prices[-window:]
-        slope = np.polyfit(x, y, 1)[0]
-        trend_slope = slope / np.mean(y) if np.mean(y) != 0 else 0
+        try:
+            slope = np.polyfit(x, y, 1)[0]
+        except (np.linalg.LinAlgError, ValueError):
+            # SVD 不收敛时用简单差分替代
+            slope = (y[-1] - y[0]) / window if window > 1 else 0
+        trend_slope = slope / (np.mean(y) + 1e-10)
 
         # ── 支撑阻力 ──
         recent = prices[-30:] if n >= 30 else prices
@@ -2198,7 +2204,10 @@ class RecommendationService:
         # log(R/S) = H * log(lag) + C，线性回归斜率 = H
         log_lags = np.log(lags[:len(rs_values)])
         log_rs = np.log(np.array(rs_values))
-        slope = np.polyfit(log_lags, log_rs, 1)[0]
+        try:
+            slope = np.polyfit(log_lags, log_rs, 1)[0]
+        except (np.linalg.LinAlgError, ValueError):
+            return 0.5  # SVD 不收敛时返回随机游走
         return float(np.clip(slope, 0.1, 0.9))
 
     @staticmethod
