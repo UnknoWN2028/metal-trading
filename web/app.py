@@ -1,6 +1,6 @@
 """
-有色金属回收倒卖AI系统 v4 — 专业版UI
-优化: 卡片布局 / 侧边栏精简 / 视觉层次 / 修复HTML
+有色金属回收倒卖AI系统 v5 — Dark Luxury 专业UI
+商业级设计: 深色基底 + 金铜渐变 + 毛玻璃卡片 + 微动效
 """
 import streamlit as st
 import time
@@ -207,7 +207,7 @@ with st.sidebar:
             background:{PALETTE['gradient']};
             -webkit-background-clip:text;-webkit-text-fill-color:transparent;
             background-clip:text;">🔩 Metal AI Trading</div>
-        <div style="font-size:0.68rem;color:{PALETTE['text_muted']};margin-top:2px;">v4.0 多因子智能分析</div>
+        <div style="font-size:0.68rem;color:{PALETTE['text_muted']};margin-top:2px;">v5.0 Dark Luxury</div>
     </div>""", unsafe_allow_html=True)
 
     # ── 导航 ──
@@ -416,7 +416,7 @@ if page == "📊 仪表盘":
 
     # ── AI 推荐 ──
     st.markdown("---")
-    section_header("🤖 AI 智能推荐", "v4.0 多因子分析 · 点击「AI推荐」查看详情")
+    section_header("🤖 AI 智能推荐", "v5.0 Dark Luxury · 点击「AI推荐」查看详情")
     try:
         latest_recs = st.session_state.get("_latest_recs")
         if latest_recs:
@@ -638,7 +638,7 @@ elif page == "🤖 AI推荐":
             st.cache_data.clear()
             st.rerun()
     with col_info:
-        st.caption("v4.0 14因子引擎 · Hurst指数 + 三峰背离 + Half-Kelly + DeepSeek AI")
+        st.caption("v5.0 Dark Luxury · 14因子 · Hurst + 背离 + Half-Kelly + DeepSeek")
 
     try:
         with st.spinner("🧠 多因子引擎分析中..."):
@@ -1085,7 +1085,7 @@ else:
     real_label = "🟡 本地模拟数据"
 st.markdown(
     f'<div style="text-align:center;color:{PALETTE["text_muted"]};font-size:0.74rem;padding:6px 0;">'
-    f'🔩 Metal AI Trading System v4.0 · 14因子统计增强 · {real_label}'
+    f'🔩 Metal AI Trading System v5.0 · Dark Luxury · {real_label}'
     '</div>',
     unsafe_allow_html=True,
 )
