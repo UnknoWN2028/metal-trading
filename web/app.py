@@ -9,12 +9,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Force fresh import on Streamlit Cloud (clear stale .pyc caches)
-import importlib
-for mod in list(sys.modules):
-    if 'services' in mod or 'database' in mod or 'config' in mod:
-        del sys.modules[mod]
-importlib.invalidate_caches()
+# Force fresh import on local dev reloads (safe on Cloud: fresh env each deploy)
+try:
+    import importlib
+    for mod in list(sys.modules):
+        if ('services' in mod or 'database' in mod or 'config' in mod) and mod in sys.modules:
+            sys.modules.pop(mod, None)
+    importlib.invalidate_caches()
+except Exception:
+    pass  # Cloud env / first import — nothing to clear
 
 from database import init_db, SessionLocal
 from services.price_service import MetalPriceService
