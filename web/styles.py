@@ -348,9 +348,83 @@ hr {
 }
 ::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
 
+/* ══════════ 无障碍: Focus Visible ══════════ */
+:focus-visible {
+    outline: 2px solid """ + PALETTE["accent"] + """ !important;
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+:focus:not(:focus-visible) {
+    outline: none !important;
+}
+/* Streamlit specific focus tweaks */
+.stButton > button:focus-visible,
+.stSelectbox [data-baseweb="select"] > div:focus-visible,
+.stTextInput input:focus-visible,
+.stNumberInput input:focus-visible,
+div[role="radiogroup"] > label:focus-visible {
+    box-shadow: 0 0 0 3px rgba(200,146,58,0.25) !important;
+}
+
+/* ══════════ 无障碍: Reduced Motion ══════════ */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    [data-testid="stMetric"]:hover { transform: none !important; }
+    .stButton > button:hover { transform: none !important; }
+    .live-pulse { animation: none !important; }
+    .skeleton-shimmer { animation: none !important; }
+}
+
 /* ══════════ Spinner ══════════ */
 .stSpinner > div {
     border-color: """ + PALETTE["accent"] + """ transparent transparent transparent !important;
+}
+
+/* ══════════ 骨架屏 Shimmer ══════════ */
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        """ + PALETTE["border"] + """ 25%,
+        """ + PALETTE["bg_main"] + """ 50%,
+        """ + PALETTE["border"] + """ 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+    border-radius: 8px;
+}
+@keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ══════════ 实时行情脉冲指示 ══════════ */
+.live-pulse {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: """ + PALETTE["success"] + """;
+    animation: live-pulse-anim 2s ease-in-out infinite;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+@keyframes live-pulse-anim {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* ══════════ 数字滚动过渡 ══════════ */
+.price-update {
+    animation: price-flash 0.6s ease-out;
+}
+@keyframes price-flash {
+    0% { background: rgba(200,146,58,0.12); }
+    100% { background: transparent; }
 }
 
 /* ═══════════════════════════════════════
@@ -658,10 +732,32 @@ def empty_state(message: str, icon: str = "📭"):
     """空状态占位 — 更精致的卡片式"""
     st.markdown(f"""
     <div style="text-align:center;padding:40px 20px;background:{PALETTE['bg_card_alt']};
-                border:1px dashed {PALETTE['border']};border-radius:12px;margin:12px 0;">
+                border:1px dashed {PALETTE['border']};border-radius:12px;margin:12px 0;"
+                role="status" aria-label="{message}">
         <div style="font-size:2.2rem;margin-bottom:10px;opacity:0.6;">{icon}</div>
         <div style="font-size:0.88rem;color:{PALETTE['text_muted']};">{message}</div>
     </div>""", unsafe_allow_html=True)
+
+
+def skeleton_card(height: str = "120px", width: str = "100%", count: int = 1):
+    """骨架屏卡片 — 数据加载占位"""
+    cards = ""
+    for _ in range(count):
+        cards += f'<div class="skeleton" style="height:{height};width:{width};margin:8px 0;"></div>'
+    st.markdown(
+        f'<div role="status" aria-label="加载中" aria-busy="true">{cards}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def live_indicator(label: str = "实时"):
+    """实时数据脉冲指示器"""
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:4px;font-size:0.72rem;'
+        f'color:{PALETTE["success"]};font-weight:600;margin:2px 0;">'
+        f'<span class="live-pulse"></span>{label}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def mobile_kpi_row(items: list, cols_per_row: int = 2):
@@ -719,16 +815,17 @@ def datasource_badge(is_real: bool, label: str = ""):
     if is_real:
         color = PALETTE["success"]
         bg = PALETTE["success_bg"]
-        icon = "⚡"
         text = label or "SHFE 实时"
+        live_dot = '<span class="live-pulse" style="display:inline-block;margin-right:3px;vertical-align:middle;"></span>'
     else:
         color = PALETTE["warning"]
         bg = PALETTE["warning_bg"]
-        icon = "📀"
         text = label or "本地模拟"
+        live_dot = "📀 "
     st.markdown(
-        f'<div class="datasource-indicator" style="background:{bg};color:{color};">'
-        f'{icon} {text}</div>',
+        f'<div class="datasource-indicator" style="background:{bg};color:{color};"'
+        f' role="status" aria-label="数据源: {text}">'
+        f'{live_dot}{text}</div>',
         unsafe_allow_html=True,
     )
 

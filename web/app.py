@@ -32,6 +32,7 @@ from web.styles import (
     PLOTLY_FAST_CONFIG, PALETTE,
     sidebar_section_title, sidebar_price_row, sidebar_news_item,
     datasource_badge, news_item_card, backtest_outcome_card, roi_display,
+    skeleton_card, live_indicator,
 )
 import pandas as pd
 import plotly.graph_objects as go
@@ -222,6 +223,7 @@ with st.sidebar:
     real_enabled = services["price"].is_using_real_data
     if real_enabled:
         datasource_badge(True, "SHFE 实时行情")
+        live_indicator("数据实时更新中")
         col_r1, col_r2 = st.columns(2)
         with col_r1:
             if st.button("🔄 刷新", width='stretch', help="获取最新SHFE报价"):
@@ -351,6 +353,8 @@ if real_enabled and st.session_state.get("_auto_refresh", True):
 # ═══════════════════════════════════════════════════════════
 if page == "📊 仪表盘":
     st.title("📊 仪表盘总览")
+    if real_enabled:
+        live_indicator("SHFE 实时数据")
 
     inv_s = get_inventory_summary()
     prof = get_profit_summary(30)
@@ -364,6 +368,7 @@ if page == "📊 仪表盘":
     # ── 行情热力 + 库存分布 ──
     left, right = st.columns(2)
     with left:
+        st.markdown('<div role="region" aria-label="行情热力图">', unsafe_allow_html=True)
         section_header("🔥 行情热力", "各金属日涨跌幅")
         summaries = get_cached_summaries()
         if summaries:
@@ -404,6 +409,7 @@ if page == "📊 仪表盘":
             st.plotly_chart(fig, width='stretch', config=PLOTLY_FAST_CONFIG)
         else:
             empty_state("暂无库存数据", "📦")
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # ── AI 推荐 ──
     st.markdown("---")
