@@ -1,6 +1,6 @@
 """
-UI 样式系统 v5 — Dark Luxury 金融交易主题
-商业级设计: 深色基底 + 金铜渐变 + 毛玻璃卡片 + 微动效
+UI 样式系统 v5 — 浅色金融交易主题
+商业级设计: 毛玻璃卡片 + 金铜渐变 + 微动效 + Staggered 动画
 """
 import streamlit as st
 from typing import Optional
@@ -10,51 +10,51 @@ from typing import Optional
 #  Palette — Dark Luxury 语义 Token 体系
 # ═════════════════════════════════════════════════════════
 PALETTE = {
-    # ── 深色表面层级 ──
-    "bg_deep":         "#080B12",   # 最深层 (页面背景)
-    "bg_base":         "#0F1219",   # 主背景
-    "bg_surface":      "#161A23",   # 卡片/侧边栏
-    "bg_surface_hover":"#1C2130",   # 卡片悬停
-    "bg_surface_alt":  "#1E2433",   # 次要表面
-    "bg_overlay":      "rgba(22,26,35,0.85)",  # 毛玻璃覆盖层
+    # ── 浅色表面层级 ──
+    "bg_deep":         "#E8ECF1",   # 最深 (装饰用)
+    "bg_base":         "#F3F4F8",   # 主背景
+    "bg_surface":      "#FFFFFF",   # 卡片/侧边栏
+    "bg_surface_hover":"#F9FAFB",   # 卡片悬停
+    "bg_surface_alt":  "#F9FAFB",   # 次要表面
+    "bg_overlay":      "rgba(255,255,255,0.85)",  # 毛玻璃覆盖层
 
     # ── 文字 ──
-    "text_primary":    "#E8ECF1",
-    "text_secondary":  "#8B95A5",
-    "text_muted":      "#545D6E",
+    "text_primary":    "#111827",
+    "text_secondary":  "#4B5563",
+    "text_muted":      "#9CA3AF",
 
     # ── 边框 ──
-    "border":          "#1E2636",
-    "border_light":    "#252D3F",
+    "border":          "#E5E7EB",
+    "border_light":    "#F3F4F6",
     "border_focus":    "#C8923A",
 
     # ── 品牌金铜色 ──
     "accent":          "#C8923A",
-    "accent_hover":    "#D4A460",
-    "accent_light":    "rgba(200,146,58,0.12)",
+    "accent_hover":    "#B07E30",
+    "accent_light":    "#FFF8F0",
     "accent_subtle":   "rgba(200,146,58,0.06)",
     "gradient":        "linear-gradient(135deg, #C8923A 0%, #D4832A 100%)",
     "gradient_glow":   "linear-gradient(135deg, #C8923A 0%, #D4832A 50%, #E8C97A 100%)",
 
-    # ── 语义色 (深色模式调优) ──
+    # ── 语义色 ──
     "success":         "#10B981",
-    "success_bg":      "rgba(16,185,129,0.10)",
-    "success_text":    "#34D399",
+    "success_bg":      "#ECFDF5",
+    "success_text":    "#065F46",
     "danger":          "#EF4444",
-    "danger_bg":       "rgba(239,68,68,0.10)",
-    "danger_text":     "#F87171",
+    "danger_bg":       "#FEF2F2",
+    "danger_text":     "#991B1B",
     "warning":         "#F59E0B",
-    "warning_bg":      "rgba(245,158,11,0.10)",
-    "warning_text":    "#FBBF24",
-    "info":            "#60A5FA",
-    "info_bg":         "rgba(96,165,250,0.10)",
-    "info_text":       "#93C5FD",
+    "warning_bg":      "#FFFBEB",
+    "warning_text":    "#92400E",
+    "info":            "#3B82F6",
+    "info_bg":         "#EFF6FF",
+    "info_text":       "#1E40AF",
 
-    # ── 阴影 (暗色 — 更柔和) ──
-    "shadow_sm":       "0 1px 3px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.02)",
-    "shadow_md":       "0 4px 16px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03)",
-    "shadow_lg":       "0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)",
-    "shadow_glow":     "0 0 30px rgba(200,146,58,0.15), 0 0 0 1px rgba(200,146,58,0.1)",
+    # ── 阴影 (浅色) ──
+    "shadow_sm":       "0 1px 2px rgba(0,0,0,0.04)",
+    "shadow_md":       "0 2px 8px rgba(0,0,0,0.06)",
+    "shadow_lg":       "0 8px 24px rgba(0,0,0,0.08)",
+    "shadow_glow":     "0 0 24px rgba(200,146,58,0.12)",
 }
 
 # ═════════════════════════════════════════════════════════
@@ -967,9 +967,9 @@ def recommendation_card(rec: dict, index: int, action_type: str):
 
 
 def plotly_theme() -> dict:
-    """Plotly 深色主题"""
+    """Plotly 浅色主题"""
     return dict(
-        template="plotly_dark",
+        template="plotly_white",
         paper_bgcolor=PALETTE["bg_surface"],
         plot_bgcolor=PALETTE["bg_surface_alt"],
         font=dict(color=PALETTE["text_muted"], size=12),

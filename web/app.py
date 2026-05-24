@@ -416,7 +416,7 @@ if page == "📊 仪表盘":
 
     # ── AI 推荐 ──
     st.markdown("---")
-    section_header("🤖 AI 智能推荐", "v5.0 Dark Luxury · 点击「AI推荐」查看详情")
+    section_header("🤖 AI 智能推荐", "v5.0 商业级引擎 · 点击「AI推荐」查看详情")
     try:
         latest_recs = st.session_state.get("_latest_recs")
         if latest_recs:
@@ -638,7 +638,7 @@ elif page == "🤖 AI推荐":
             st.cache_data.clear()
             st.rerun()
     with col_info:
-        st.caption("v5.0 Dark Luxury · 14因子 · Hurst + 背离 + Half-Kelly + DeepSeek")
+        st.caption("v5.0 商业级引擎 · 14因子 · Hurst + 背离 + Half-Kelly + DeepSeek")
 
     try:
         with st.spinner("🧠 多因子引擎分析中..."):
@@ -1085,7 +1085,7 @@ else:
     real_label = "🟡 本地模拟数据"
 st.markdown(
     f'<div style="text-align:center;color:{PALETTE["text_muted"]};font-size:0.74rem;padding:6px 0;">'
-    f'🔩 Metal AI Trading System v5.0 · Dark Luxury · {real_label}'
+    f'🔩 Metal AI Trading System v5.0 · 商业级智能分析 · {real_label}'
     '</div>',
     unsafe_allow_html=True,
 )
